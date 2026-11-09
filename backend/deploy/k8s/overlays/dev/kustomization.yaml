@@ -1,0 +1,77 @@
+# Dev cluster (kind / k3d / Docker Desktop / a shared dev namespace): everything in-cluster,
+# one API pod, auth optional, telemetry to Dash0's `dev` dataset.
+#
+#   kubectl kustomize deploy/k8s/overlays/dev | less
+#   kubectl apply -k deploy/k8s/overlays/dev
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: evently
+
+resources:
+  - ../../base
+  - postgres.yaml
+  - elasticsearch.yaml
+
+# Uncomment to try multi-pod routing in dev (read docs/DEPLOYMENT.md → "Scaling out" first).
+# components:
+#   - ../../components/scale-out
+
+images:
+  - name: ghcr.io/OWNER/evently-api
+    newTag: dev
+
+patches:
+  # App settings for dev.
+  - target:
+      kind: ConfigMap
+      name: evently-api-config
+    patch: |-
+      - op: replace
+        path: /data/ENVIRONMENT
+        value: development
+      - op: add
+        path: /data/AUTH_REQUIRED
+        value: "false"
+      - op: replace
+        path: /data/CORS_ORIGINS
+        value: '["http://localhost:3000","http://localhost:5173","http://api.evently.localtest.me"]'
+      - op: replace
+        path: /data/DASH0_DATASET
+        value: dev
+      - op: add
+        path: /data/ELASTICSEARCH_URL
+        value: http://evently-elasticsearch:9200
+  # In-cluster Postgres (overlays/dev/postgres.yaml) instead of a managed DB.
+  - target:
+      kind: Secret
+      name: evently-api-secrets
+    patch: |-
+      - op: replace
+        path: /stringData/DATABASE_URL
+        value: postgresql+asyncpg://evently:evently-dev-password@evently-postgres:5432/evently
+      - op: replace
+        path: /stringData/SECRET_KEY
+        value: dev-insecure-secret-key-change-me-in-production
+      - op: remove
+        path: /stringData/ELASTICSEARCH_URL
+  # *.localtest.me resolves to 127.0.0.1, which suits kind/k3d with ingress-nginx port-forwarded to :80.
+  - target:
+      kind: Ingress
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: api.evently.localtest.me
+  # Dev pods are small.
+  - target:
+      kind: Deployment
+      name: evently-api
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests: { cpu: 100m, memory: 256Mi }
+          limits: { cpu: "1", memory: 768Mi }
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always

@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Evently local data
+*.db
+*.db-wal
+*.db-shm
