@@ -1,0 +1,107 @@
+import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
+import { AlertTriangle, Calendar, Check, ChevronRight, Contact, Globe, Loader2, Lock, Mail, MapPin, Presentation, Unlink } from 'lucide-react'
+import { INTEGRATION_LABEL, needsGoogle } from '../data/workflows'
+import { NODE_H, NODE_W } from '../lib/layout'
+import type { Integration, Task } from '../types'
+
+// `approved` / `reviewed`: how many of this step's options the user has approved / approved or ignored.
+export type TaskNodeType = Node<
+  { task: Task; selected: boolean; approved: number; reviewed: number; googleConnected: boolean; planApproved: boolean },
+  'task'
+>
+
+const ICON: Record<Integration, typeof Globe> = {
+  'google-maps': MapPin,
+  gmail: Mail,
+  'google-calendar': Calendar,
+  'google-contacts': Contact,
+  'google-slides': Presentation,
+  web: Globe,
+}
+
+// Done is green, in progress is an animated theme gradient, error is red.
+const STATUS_STYLE = {
+  idle: 'border-line bg-white',
+  queued: 'border-line bg-white opacity-70',
+  running: 'node-running border-indigo-400 ring-4 ring-indigo-300/50 shadow-lg shadow-indigo-500/20',
+  approved: 'border-ok bg-white',
+  done: 'border-emerald-300 bg-emerald-50',
+  blocked: 'border-warn/50 border-dashed bg-white',
+  error: 'border-rose-300 bg-rose-50',
+} as const
+
+export default function TaskNode({ data }: NodeProps<TaskNodeType>) {
+  const { task, selected, approved, reviewed, googleConnected, planApproved } = data
+  // Finished agents only count as done once the user approves an option.
+  // Agent finished: purple check once an option is approved, green (complete) once the plan is approved too.
+  type Shown = Task['status'] | 'approved'
+  const status: Shown = task.status !== 'done' ? task.status : !approved ? 'idle' : planApproved ? 'done' : 'approved'
+  // Waiting steps that need an unlinked service show the disconnect icon instead of the lock.
+  const unlinked = (status === 'blocked' || status === 'queued') && needsGoogle(task.integration) && !googleConnected
+  const blockedBy = unlinked ? 'google' : status === 'blocked' ? task.blockedBy : undefined
+  // Stuck behind another step reads as waiting, not as an error.
+  const look = unlinked ? 'blocked' : status === 'blocked' ? 'queued' : status
+  const Icon = ICON[task.integration]
+
+  return (
+    <div
+      style={{ width: NODE_W, height: NODE_H }}
+      className={`flex cursor-pointer flex-col justify-between rounded-2xl border px-4 py-3 transition-[box-shadow,background-color,border-color] duration-300 ${STATUS_STYLE[look]} ${
+        selected ? 'shadow-lg outline-2 outline-offset-3 outline-accent' : 'shadow-sm hover:shadow-md'
+      }`}
+    >
+      <Handle type="target" position={Position.Left} className="!size-1.5 !border-0 !bg-muted/40" />
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-[15px] font-semibold">{task.title}</div>
+          <div className="truncate text-xs text-muted">{task.agent} agent</div>
+        </div>
+        <StatusBadge status={unlinked ? 'blocked' : status} blockedBy={blockedBy} />
+      </div>
+      <div className="flex items-center gap-1.5 font-mono text-[11px] whitespace-nowrap text-muted">
+        <Icon size={12} />
+        {INTEGRATION_LABEL[task.integration]}
+        {task.results && (
+          <span className="ml-auto flex items-center whitespace-nowrap text-accent">
+            {reviewed ? `${reviewed} reviewed` : `${task.results.length} found`}
+            <ChevronRight size={12} className={`transition ${selected ? 'rotate-180' : ''}`} />
+          </span>
+        )}
+      </div>
+      <Handle type="source" position={Position.Right} className="!size-1.5 !border-0 !bg-muted/40" />
+    </div>
+  )
+}
+
+// Broken chain: needs a service that isn't linked. Lock: waiting on earlier steps to finish.
+function StatusBadge({ status, blockedBy }: { status: Task['status'] | 'approved'; blockedBy: Task['blockedBy'] }) {
+  if (status === 'running') return <Loader2 size={16} className="shrink-0 animate-spin text-run" />
+  if (status === 'done' || status === 'approved')
+    return (
+      <span
+        title={status === 'done' ? 'Complete' : 'Approved'}
+        className={`grid size-5 shrink-0 place-items-center rounded-full text-white ${status === 'done' ? 'bg-emerald-500' : 'bg-ok'}`}
+      >
+        <Check size={12} strokeWidth={3} />
+      </span>
+    )
+  if (status === 'error')
+    return (
+      <span title="The agent run failed">
+        <AlertTriangle size={15} className="shrink-0 text-rose-600" />
+      </span>
+    )
+  if (status === 'blocked' && blockedBy === 'google')
+    return (
+      <span title="Needs a Google connection">
+        <Unlink size={15} className="shrink-0 text-warn" />
+      </span>
+    )
+  if (status === 'blocked' || status === 'queued')
+    return (
+      <span title="Waiting on earlier steps">
+        <Lock size={15} className="shrink-0 text-muted" />
+      </span>
+    )
+  return null
+}
