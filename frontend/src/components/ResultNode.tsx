@@ -1,14 +1,26 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
-import { AlertTriangle, Check, ChevronUp, ExternalLink, Link2, Loader2, Mail, Phone, Plus, RotateCw, Star, Users, X } from 'lucide-react'
-import { useState, type FormEvent, type MouseEvent } from 'react'
+import { AlertTriangle, Check, ChevronUp, ExternalLink, Link2, Loader2, Mail, Phone, Plus, RotateCw, Star, Upload, Users, X } from 'lucide-react'
+import QRCode from 'qrcode'
+import { useEffect, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react'
+import { isDone, type TodoProgress } from '../lib/execute'
 import type { Field, FieldKey } from '../lib/options'
 import type { TaskResult } from '../types'
 
 export type Decision = 'approved' | 'ignored'
 
+// One live-slides option's deck. `slides` is null until there's a draft or an upload; `uploaded`: the user's own file.
+export interface LiveInfo {
+  slides: number | null
+  uploaded: boolean
+  presentUrl: string
+  audienceUrl: string
+  uploadUrl: string
+}
+
 export type ResultItem =
   // `implied`: approved only because the whole plan was approved. `planApproved`: agents act on approved options.
-  | { kind: 'result'; n: number; result: TaskResult; decision?: Decision; implied?: boolean; planApproved?: boolean }
+  // `live`: set on options of a live-slides step, each of which is its own deck with its own QR code.
+  | { kind: 'result'; n: number; result: TaskResult; decision?: Decision; implied?: boolean; planApproved?: boolean; live?: LiveInfo }
   | { kind: 'loading'; agent: string }
   | { kind: 'locked'; integration: string }
   | { kind: 'error'; message: string }
@@ -19,8 +31,8 @@ export interface ResultNodeData extends Record<string, unknown> {
   size: { w: number; h: number }
   expanded: boolean
   city: string
-  // Todo indexes the user has checked off.
-  checked: Set<number>
+  // How far this option's checklist has got, per item (missing = not started).
+  progress: TodoProgress[]
   onOpen: () => void
   onDecide: (d: Decision) => void
   onToggleTodo: (i: number) => void
@@ -116,7 +128,7 @@ export default function ResultNode({ data }: NodeProps<ResultNodeType>) {
 
       {item.kind === 'result' && (
         <>
-          <Summary item={item} expanded={expanded} />
+          <Summary item={item} expanded={expanded} progress={data.progress} />
           {expanded && <Details data={data} item={item} />}
         </>
       )}
@@ -124,8 +136,14 @@ export default function ResultNode({ data }: NodeProps<ResultNodeType>) {
   )
 }
 
-function Summary({ item, expanded }: { item: Extract<ResultItem, { kind: 'result' }>; expanded: boolean }) {
+function Summary({ item, expanded, progress }: { item: Extract<ResultItem, { kind: 'result' }>; expanded: boolean; progress: TodoProgress[] }) {
   const { n, result: r, decision, implied, planApproved } = item
+  const todo = r.todo ?? []
+  const done = todo.filter((_, i) => isDone(progress[i])).length
+  // Once agents act on this option, its pill tracks the checklist instead of the decision.
+  const acting = decision === 'approved' && planApproved && todo.length > 0
+  const working = acting && progress.some((p) => p?.status === 'working')
+  const needsYou = acting && !working && progress.some((p) => p?.status === 'needs-you')
   const badge = decision === 'approved' ? 'bg-emerald-500 text-white' : decision === 'ignored' ? 'bg-rose-500 text-white' : 'bg-accent text-white'
   return (
     <div className={`flex shrink-0 items-center gap-3 px-3.5 ${expanded ? 'border-b border-gray-900/5 py-3' : 'h-full'}`}>
@@ -150,19 +168,41 @@ function Summary({ item, expanded }: { item: Extract<ResultItem, { kind: 'result
         </div>
         <div className="truncate text-[11px] text-muted">{r.address ?? r.contact?.name ?? r.meta}</div>
       </div>
+      {item.live && !expanded && <QrImage url={item.live.audienceUrl} className="size-14 shrink-0 rounded-lg ring-1 ring-gray-900/10" />}
       {expanded ? (
         <ChevronUp size={16} className="shrink-0 text-muted" />
       ) : (
         <span
-          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${
-            decision === 'approved'
+          className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${
+            working
+              ? 'bg-accent-soft text-accent ring-accent/30'
+              : needsYou
+                ? 'bg-amber-50 text-amber-700 ring-amber-300'
+                : decision === 'approved'
               ? 'bg-emerald-100 text-emerald-700 ring-emerald-300'
               : decision === 'ignored'
                 ? 'bg-rose-100 text-rose-700 ring-rose-300'
                 : 'bg-white text-muted ring-gray-900/10'
           }`}
         >
-          {decision === 'approved' ? (implied ? 'Auto-approved' : 'Approved') : decision === 'ignored' ? (planApproved ? 'Ignored · won’t run' : 'Ignored') : 'Pending'}
+          {working && <Loader2 size={10} className="animate-spin" />}
+          {acting
+            ? working
+              ? `Working ${done}/${todo.length}`
+              : needsYou
+                ? `Needs you · ${done}/${todo.length}`
+                : done === todo.length
+                  ? `Done ${done}/${todo.length}`
+                  : `Approved · ${done}/${todo.length}`
+            : decision === 'approved'
+              ? implied
+                ? 'Auto-approved'
+                : 'Approved'
+              : decision === 'ignored'
+                ? planApproved
+                  ? 'Ignored · won’t run'
+                  : 'Ignored'
+                : 'Pending'}
         </span>
       )}
     </div>
@@ -170,13 +210,15 @@ function Summary({ item, expanded }: { item: Extract<ResultItem, { kind: 'result
 }
 
 function Details({ data, item }: { data: ResultNodeData; item: Extract<ResultItem, { kind: 'result' }> }) {
-  const { city, checked, onDecide, onToggleTodo } = data
+  const { city, progress, onDecide, onToggleTodo } = data
   const r = item.result
   const todo = r.todo ?? []
-  const done = todo.filter((_, i) => checked.has(i)).length
+  const done = todo.filter((_, i) => isDone(progress[i])).length
 
   return (
     <div onClick={stop} className="nowheel flex min-h-0 flex-1 cursor-default flex-col gap-4 overflow-y-auto p-4 text-sm">
+      {item.live && <LivePanel live={item.live} />}
+
       {r.why && (
         <div>
           <Label>Why it fits</Label>
@@ -192,20 +234,12 @@ function Details({ data, item }: { data: ResultNodeData; item: Extract<ResultIte
               {done}/{todo.length}
             </span>
           </Label>
-          <ul className="space-y-1.5">
+          {!item.planApproved && item.decision !== 'ignored' && (
+            <p className="mb-2 text-[11px] text-muted">The agent starts on these once the plan is approved.</p>
+          )}
+          <ul className="space-y-2">
             {todo.map((t, i) => (
-              <li key={t}>
-                <button onClick={() => onToggleTodo(i)} className="flex w-full items-start gap-2.5 text-left text-[13px]">
-                  <span
-                    className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded-md ring-1 transition ${
-                      checked.has(i) ? 'bg-accent text-white ring-accent' : 'bg-white ring-gray-300'
-                    }`}
-                  >
-                    {checked.has(i) && <Check size={10} strokeWidth={3} />}
-                  </span>
-                  <span className={checked.has(i) ? 'text-muted line-through' : ''}>{t}</span>
-                </button>
-              </li>
+              <TodoRow key={t} text={t} progress={progress[i]} onToggle={() => onToggleTodo(i)} />
             ))}
           </ul>
         </div>
@@ -340,6 +374,90 @@ function AddForm({
   )
 }
 
-function Label({ children }: { children: React.ReactNode }) {
+function Label({ children }: { children: ReactNode }) {
   return <div className="mb-1.5 flex items-center text-[10px] font-semibold tracking-wide text-muted uppercase">{children}</div>
+}
+
+function QrImage({ url, className }: { url: string; className: string }) {
+  const [src, setSrc] = useState<string | null>(null)
+  useEffect(() => {
+    QRCode.toDataURL(url, { margin: 1, width: 240, color: { dark: '#1e1b4b', light: '#ffffff' } }).then(setSrc, () => setSrc(null))
+  }, [url])
+  return src ? <img src={src} alt={`QR code for ${url}`} className={`bg-white ${className}`} /> : <div className={`bg-white ${className}`} />
+}
+
+// This option's own deck: its audience QR code, and buttons that open the presenter or upload in a new tab.
+function LivePanel({ live }: { live: LiveInfo }) {
+  const ready = live.slides !== null
+  const link = 'flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition'
+  return (
+    <div>
+      <Label>
+        Present live
+        {ready && (
+          <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-rose-50 px-1.5 text-[10px] font-semibold tracking-normal text-rose-600 normal-case">
+            <span className="size-1 rounded-full bg-rose-500" /> Live
+          </span>
+        )}
+      </Label>
+      <div className="flex gap-3 rounded-xl bg-white/80 p-3 ring-1 ring-gray-900/5">
+        <QrImage url={live.audienceUrl} className="size-28 shrink-0 rounded-lg ring-1 ring-gray-900/10" />
+        <div className="flex min-w-0 flex-1 flex-col text-xs">
+          <div className="font-semibold">
+            {ready ? `${live.uploaded ? 'Your slides' : 'Draft deck'} · ${live.slides} ${live.slides === 1 ? 'slide' : 'slides'}` : 'No slides yet'}
+          </div>
+          <p className="mt-0.5 leading-snug text-muted">
+            {ready ? 'The audience scans this code to follow along.' : 'Upload a PDF or images. Anyone who scans early sees the slides once they’re added.'}
+          </p>
+          <div className="mt-auto flex gap-1.5 pt-2">
+            {ready && (
+              <a href={live.presentUrl} target="_blank" rel="noreferrer" className={`${link} bg-accent text-white hover:bg-indigo-500`}>
+                Present <ExternalLink size={11} />
+              </a>
+            )}
+            <a href={live.uploadUrl} target="_blank" rel="noreferrer" className={`${link} bg-white text-accent ring-1 ring-gray-900/10 hover:ring-accent`}>
+              <Upload size={11} /> {live.uploaded ? 'Replace' : 'Upload'}
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// One checklist item. The agent ticks items as it finishes them; the user can tick any by hand.
+function TodoRow({ text, progress, onToggle }: { text: string; progress?: TodoProgress; onToggle: () => void }) {
+  const status = progress?.status ?? 'pending'
+  const done = status === 'done'
+  const box =
+    status === 'working'
+      ? 'bg-accent-soft text-accent ring-accent/40'
+      : done
+        ? progress?.by === 'agent'
+          ? 'bg-emerald-500 text-white ring-emerald-500'
+          : 'bg-accent text-white ring-accent'
+        : status === 'needs-you'
+          ? 'bg-amber-50 ring-amber-400'
+          : 'bg-white ring-gray-300'
+  return (
+    <li>
+      <button
+        onClick={onToggle}
+        disabled={status === 'working'}
+        aria-label={`${text}: ${done ? 'done' : status === 'working' ? 'agent working' : status === 'needs-you' ? 'needs you' : 'not done'}`}
+        className="flex w-full items-start gap-2.5 text-left text-[13px] disabled:cursor-progress"
+      >
+        <span className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded-md ring-1 transition ${box}`}>
+          {status === 'working' ? <Loader2 size={10} className="animate-spin" /> : done && <Check size={10} strokeWidth={3} />}
+        </span>
+        <span className="min-w-0">
+          <span className={done ? 'text-muted line-through' : ''}>{text}</span>
+          {status === 'working' && <span className="block text-[11px] text-accent">Agent working on this…</span>}
+          {done && progress?.by === 'agent' && progress.note && <span className="block text-[11px] text-emerald-700">{progress.note}</span>}
+          {done && progress?.by === 'you' && <span className="block text-[11px] text-muted">Ticked by you</span>}
+          {status === 'needs-you' && <span className="block text-[11px] text-amber-700">Needs you. {progress?.note}</span>}
+        </span>
+      </button>
+    </li>
+  )
 }

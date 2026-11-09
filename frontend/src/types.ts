@@ -6,6 +6,8 @@ export type Integration =
   | 'google-calendar'
   | 'google-contacts'
   | 'google-slides'
+  // Evently's own presenter view with an audience QR code; needs no Google account.
+  | 'live-slides'
   | 'web'
 
 export type TaskStatus = 'idle' | 'queued' | 'running' | 'done' | 'blocked' | 'error'

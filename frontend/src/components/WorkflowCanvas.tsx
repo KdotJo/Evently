@@ -1,11 +1,17 @@
 import { Background, Controls, ReactFlow, type Edge, type ReactFlowInstance } from '@xyflow/react'
 import { ArrowLeft, Check, CheckCircle2, Link2, Loader2, MapPin, Users } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { Deck } from '../data/demoDeck'
+import { draftDeck } from '../data/draftDecks'
 import { EVENT_TYPES, INTEGRATION_LABEL, needsGoogle } from '../data/workflows'
+import { optionDeckId, saveDeck, useDecks } from '../lib/deckStore'
+import { runChecklist, type Progress, type TodoProgress } from '../lib/execute'
 import { layout, type Box } from '../lib/layout'
+import { audienceUrl, presenterUrl, uploadUrl } from '../lib/live'
 import { addFields, addFormHeight, buildOption, type FieldKey } from '../lib/options'
+import type { Review } from '../lib/recent'
 import type { EventDetails, Task, TaskResult } from '../types'
-import ResultNode, { type Decision, type ResultItem, type ResultNodeType } from './ResultNode'
+import ResultNode, { type Decision, type LiveInfo, type ResultItem, type ResultNodeType } from './ResultNode'
 import TaskNode, { type TaskNodeType } from './TaskNode'
 
 const nodeTypes = { task: TaskNode, result: ResultNode }
@@ -14,11 +20,13 @@ const PAD = 32
 const MAX_FOCUS_ZOOM = 1.1
 // Matches the node transform transition in index.css.
 const MOVE_MS = 450
-const EMPTY = new Set<number>()
+const NO_PROGRESS: TodoProgress[] = []
 const OPTION_ZOOM = 1.2
 
 interface Props {
   event: EventDetails
+  // Scopes the decks of this plan's live-slides steps.
+  planId: string
   tasks: Task[]
   selectedId: string | null
   googleConnected: boolean
@@ -30,6 +38,9 @@ interface Props {
   onAddOption: (id: string, result: TaskResult) => void
   onSelect: (id: string | null) => void
   onConnectGoogle: () => void
+  // Decisions restored from a saved plan, and where to report changes so they get saved.
+  initialReview?: Review
+  onReviewChange: (review: Review) => void
 }
 
 // What fans out of an opened step: its results, or a placeholder while it can't show any yet.
@@ -41,11 +52,23 @@ function decisionFor(decisions: Record<string, Decision>, planApproved: boolean,
   return decisions[key] ?? (planApproved ? 'approved' : undefined)
 }
 
+// Where one option of a live-slides step is presented, and its deck (null until drafted or uploaded).
+function liveInfo(deckId: string, deck: Deck | null | undefined): LiveInfo {
+  return {
+    slides: deck?.slides.length ?? null,
+    uploaded: deck?.slides[0]?.kind === 'image',
+    presentUrl: presenterUrl(deckId),
+    audienceUrl: audienceUrl(deckId),
+    uploadUrl: uploadUrl(deckId),
+  }
+}
+
 function childItems(
   task: Task | undefined,
   googleConnected: boolean,
   decisions: Record<string, Decision>,
   planApproved: boolean,
+  liveOf: (task: Task, result: TaskResult) => LiveInfo | undefined,
 ): ResultItem[] {
   if (!task) return []
   if (task.status === 'running') return [{ kind: 'loading', agent: task.agent }]
@@ -54,7 +77,15 @@ function childItems(
     return [
       ...task.results.map((result, i): ResultItem => {
         const key = `${task.id}:${result.title}`
-        return { kind: 'result', n: i + 1, result, decision: decisionFor(decisions, planApproved, key), implied: !decisions[key] && planApproved, planApproved }
+        return {
+          kind: 'result',
+          n: i + 1,
+          result,
+          decision: decisionFor(decisions, planApproved, key),
+          implied: !decisions[key] && planApproved,
+          planApproved,
+          live: liveOf(task, result),
+        }
       }),
       // Always last: lets the user add an option the agent missed.
       { kind: 'add', fields: addFields(task.id, templateOf(task)) },
@@ -63,18 +94,91 @@ function childItems(
   return []
 }
 
-export default function WorkflowCanvas({ event, tasks, selectedId, googleConnected, approved, running, onApprove, onBack, onRunTask, onAddOption, onSelect, onConnectGoogle }: Props) {
+export default function WorkflowCanvas({ event, planId, tasks, selectedId, googleConnected, approved, running, onApprove, onBack, onRunTask, onAddOption, onSelect, onConnectGoogle, initialReview, onReviewChange }: Props) {
   // `open` is the step whose children are mounted; `spread` animates them out of / back into it.
   const [open, setOpen] = useState<string | null>(null)
   const [spread, setSpread] = useState(false)
   // Approve / ignore per option, keyed `${step}:${title}`.
-  const [decisions, setDecisions] = useState<Record<string, Decision>>({})
+  const [decisions, setDecisions] = useState<Record<string, Decision>>(() => initialReview?.decisions ?? {})
   // The option the user clicked into, plus per-option progress (keyed `${step}:${title}`).
   const [focus, setFocus] = useState<number | null>(null)
-  const [checked, setChecked] = useState<Record<string, Set<number>>>({})
+  // Checklist progress per option. Older saved plans only have ticked indexes; those count as done by you.
+  const [progress, setProgress] = useState<Progress>(() => ({
+    ...Object.fromEntries(
+      Object.entries(initialReview?.checked ?? {}).map(([k, ticked]) => [k, ticked.reduce<TodoProgress[]>((l, i) => ((l[i] = { status: 'done', by: 'you' }), l), [])]),
+    ),
+    ...initialReview?.progress,
+  }))
+
+  useEffect(() => {
+    onReviewChange({ decisions, progress })
+  }, [decisions, progress]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Once the plan is approved, each approved option's agent works through its checklist and ticks
+  // items off as it finishes them. Un-approving an option stops its agent; finished items stay done.
+  const runs = useRef(new Map<string, () => void>())
+  useEffect(() => {
+    const want = new Set<string>()
+    for (const t of tasks)
+      for (const r of t.results ?? []) {
+        const key = `${t.id}:${r.title}`
+        const items = r.todo ?? []
+        const cur = progress[key] ?? []
+        if (!approved || decisionFor(decisions, approved, key) !== 'approved') continue
+        if (items.every((_, i) => cur[i] && cur[i].status !== 'pending' && cur[i].status !== 'working')) continue
+        want.add(key)
+        if (runs.current.has(key)) continue
+        const stop = runChecklist(t, r, event, cur, (i, p) =>
+          setProgress((all) => {
+            const list = [...(all[key] ?? [])]
+            // The user already ticked it by hand: keep theirs.
+            if (list[i]?.status === 'done' && list[i]?.by === 'you') return all
+            list[i] = p
+            return { ...all, [key]: list }
+          }),
+        )
+        runs.current.set(key, stop)
+      }
+    for (const [key, stop] of runs.current) {
+      if (want.has(key)) continue
+      stop()
+      runs.current.delete(key)
+      setProgress((all) => (all[key]?.some((p) => p?.status === 'working') ? { ...all, [key]: all[key].map((p) => (p?.status === 'working' ? { status: 'pending' } : p)) } : all))
+    }
+  }, [tasks, decisions, approved, progress]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => runs.current.forEach((stop) => stop()), [])
 
   const openTask = tasks.find((t) => t.id === open)
-  const items = useMemo(() => childItems(openTask, googleConnected, decisions, approved), [openTask, googleConnected, decisions, approved])
+
+  // Live-slides steps: every option is its own deck with its own QR code.
+  const liveOptions = tasks
+    .filter((t) => t.integration === 'live-slides')
+    .flatMap((t) => (t.results ?? []).map((r) => ({ task: t, result: r, id: optionDeckId(planId, t.id, r.title) })))
+  const decks = useDecks(liveOptions.map((o) => o.id))
+  // Save each option's draft deck once the agent has proposed it, unless it already has slides.
+  const drafted = useRef(new Set<string>())
+  useEffect(() => {
+    for (const { task, result, id } of liveOptions) {
+      if (decks[id] !== null || drafted.current.has(id)) continue
+      drafted.current.add(id)
+      const draft = draftDeck(event, task, result)
+      if (draft) saveDeck(id, draft).catch(() => drafted.current.delete(id))
+    }
+  }) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const liveOf = (task: Task, result: TaskResult) => {
+    if (task.integration !== 'live-slides') return undefined
+    const id = optionDeckId(planId, task.id, result.title)
+    return liveInfo(id, decks[id])
+  }
+  // Rebuild the option cards when any deck appears or changes size.
+  const decksKey = liveOptions.map((o) => `${o.id}:${decks[o.id]?.slides.length ?? decks[o.id]}:${decks[o.id]?.slides[0]?.kind}`).join('|')
+  const items = useMemo(
+    () => childItems(openTask, googleConnected, decisions, approved, liveOf),
+    [openTask, googleConnected, decisions, approved, decksKey], // eslint-disable-line react-hooks/exhaustive-deps
+  )
+  // A live step shows as live once any of its options has slides.
+  const liveSteps = new Set(liveOptions.filter((o) => decks[o.id]).map((o) => o.task.id))
   const itemsKey = `${open}:${items.length}:${items[0]?.kind ?? ''}`
 
   // Selection changed: tuck the current children back in, then open the new step.
@@ -105,7 +209,15 @@ export default function WorkflowCanvas({ event, tasks, selectedId, googleConnect
     () =>
       layout(
         tasks,
-        open ? { id: open, count: items.length, spread, focus, focusH: focusedAdd ? addFormHeight(focusedAdd.fields) : undefined } : null,
+        open
+          ? {
+              id: open,
+              count: items.length,
+              spread,
+              focus,
+              focusH: focusedAdd ? addFormHeight(focusedAdd.fields) : undefined,
+            }
+          : null,
       ),
     [tasks, open, items, spread, focus, focusedAdd],
   )
@@ -138,12 +250,12 @@ export default function WorkflowCanvas({ event, tasks, selectedId, googleConnect
 
   const keyOf = (item: ResultItem) => (item.kind === 'result' ? `${open}:${item.result.title}` : '')
 
+  // Ticking by hand marks an item done by you; unticking sends it back to the agent's queue.
   const toggleTodo = useCallback((key: string, i: number) => {
-    setChecked((c) => {
-      const next = new Set(c[key])
-      if (next.has(i)) next.delete(i)
-      else next.add(i)
-      return { ...c, [key]: next }
+    setProgress((all) => {
+      const list = [...(all[key] ?? [])]
+      list[i] = list[i]?.status === 'done' ? { status: 'pending' } : { status: 'done', by: 'you' }
+      return { ...all, [key]: list }
     })
   }, [])
 
@@ -171,7 +283,18 @@ export default function WorkflowCanvas({ event, tasks, selectedId, googleConnect
           id: task.id,
           type: 'task',
           position: { x: boxes[task.id].x, y: boxes[task.id].y },
-          data: { task, selected: task.id === selectedId, approved: approvedCount[task.id] ?? 0, reviewed: reviewedCount[task.id] ?? 0, googleConnected, planApproved: approved },
+          // Sizes are known from the layout. Passing them keeps React Flow from hiding nodes to
+          // re-measure them every time the node list is rebuilt (e.g. on each checklist update).
+          measured: { width: boxes[task.id].w, height: boxes[task.id].h },
+          data: {
+            task,
+            selected: task.id === selectedId,
+            approved: approvedCount[task.id] ?? 0,
+            reviewed: reviewedCount[task.id] ?? 0,
+            googleConnected,
+            planApproved: approved,
+            live: liveSteps.has(task.id),
+          },
           draggable: false,
           zIndex: task.id === open ? 2 : 1,
         }),
@@ -181,12 +304,13 @@ export default function WorkflowCanvas({ event, tasks, selectedId, googleConnect
           id: `${open}::${i}`,
           type: 'result',
           position: { x: children[i].x, y: children[i].y },
+          measured: { width: children[i].w, height: children[i].h },
           data: {
             item,
             size: { w: children[i].w, h: children[i].h },
             expanded: focus === i,
             city: event.city,
-            checked: checked[keyOf(item)] ?? EMPTY,
+            progress: progress[keyOf(item)] ?? NO_PROGRESS,
             onOpen: () => setFocus((f) => (f === i ? null : i)),
             onDecide: (d: Decision) => decide(keyOf(item), d),
             onToggleTodo: (t: number) => toggleTodo(keyOf(item), t),
@@ -201,7 +325,7 @@ export default function WorkflowCanvas({ event, tasks, selectedId, googleConnect
         }),
       ),
     ],
-    [tasks, boxes, children, items, open, selectedId, spread, focus, checked, approvedCount, reviewedCount, googleConnected, approved, event.city, decide, toggleTodo, connectAndRun], // eslint-disable-line react-hooks/exhaustive-deps
+    [tasks, boxes, children, items, open, selectedId, spread, focus, progress, approvedCount, reviewedCount, googleConnected, approved, event.city, decide, toggleTodo, connectAndRun, decks], // eslint-disable-line react-hooks/exhaustive-deps
   )
 
   const flowRef = useRef<ReactFlowInstance<TaskNodeType | ResultNodeType> | null>(null)

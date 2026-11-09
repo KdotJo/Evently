@@ -38,14 +38,15 @@ const WORKFLOWS: Record<EventType, TaskSeed[]> = {
     t('prizes', 'Prizes', 'Prize Designer', 'web', 'Prize tracks and pool funded by sponsor tiers.', ['sponsors']),
     t('judges', 'Judges & mentors', 'Recruiter', 'gmail', 'Invite judges and mentors, collect availability.', ['sponsors']),
     t('schedule', 'Schedule', 'Scheduler', 'google-calendar', 'Kickoff, workshops, meals, submission deadline, demos.', ['venue', 'judges']),
-    t('dayof', 'Day-of run sheet', 'Coordinator', 'google-slides', 'Live slides + QR code for attendees, volunteer roles.', ['schedule', 'catering', 'av', 'prizes', 'registration']),
+    t('slides', 'Live slides', 'Stage Manager', 'live-slides', 'Kickoff and demo-day deck with a QR code so attendees follow along.', ['schedule']),
+    t('dayof', 'Day-of run sheet', 'Coordinator', 'web', 'Volunteer roles, shifts and a minute-by-minute run sheet.', ['schedule', 'catering', 'av', 'prizes', 'registration']),
   ],
   business: [
     t('brief', 'Objectives', 'Planner', 'web', 'Goal of the event, audience, budget.'),
     t('guests', 'Guest list', 'Guest Manager', 'google-contacts', 'Pull invitees from contacts, segment VIPs.', ['brief']),
     t('venue', 'Location', 'Venue Scout', 'google-maps', 'Meeting spaces and private dining near the office.', ['brief']),
     t('catering', 'Catering', 'Caterer', 'google-maps', 'Menu options and dietary needs.', ['venue']),
-    t('presentation', 'Presentation', 'Deck Builder', 'google-slides', 'Agenda deck with live-slide QR for the room.', ['brief']),
+    t('presentation', 'Presentation', 'Deck Builder', 'live-slides', 'Agenda deck with live-slide QR for the room.', ['brief']),
     t('invites', 'Invitations', 'Outreach', 'gmail', 'Send invites, track RSVPs.', ['guests', 'venue']),
     t('calendar', 'Calendar holds', 'Scheduler', 'google-calendar', 'Block time for attendees and speakers.', ['invites']),
     t('followup', 'Follow-up', 'Outreach', 'gmail', 'Thank-you notes, transcript and slides recap.', ['calendar', 'catering', 'presentation']),
@@ -59,7 +60,7 @@ const WORKFLOWS: Record<EventType, TaskSeed[]> = {
     t('hotels', 'Hotel blocks', 'Travel Agent', 'google-maps', 'Room blocks near the venue for speakers + attendees.', ['venue']),
     t('catering', 'Catering', 'Caterer', 'google-maps', 'Breakfast, lunch and coffee breaks per day.', ['venue']),
     t('agenda', 'Agenda', 'Scheduler', 'google-calendar', 'Multi-track schedule, room assignments.', ['speakers', 'venue']),
-    t('slides', 'Live slides & transcript', 'Stage Manager', 'google-slides', 'Live slide QR codes and voice transcript per session.', ['agenda']),
+    t('slides', 'Live slides & transcript', 'Stage Manager', 'live-slides', 'Live slide QR codes and voice transcript per session.', ['agenda']),
   ],
   wedding: [
     t('brief', 'Budget & vision', 'Planner', 'web', 'Style, season, budget split.'),
@@ -79,7 +80,7 @@ const WORKFLOWS: Record<EventType, TaskSeed[]> = {
     t('venue', 'Location', 'Venue Scout', 'google-maps', 'Restaurants, parks or halls near most attendees.', ['brief']),
     t('catering', 'Food', 'Caterer', 'google-maps', 'Catering or set menu options.', ['venue']),
     t('invites', 'Invitations', 'Outreach', 'gmail', 'Send invite + RSVP link.', ['date', 'venue']),
-    t('memories', 'Photo slideshow', 'Archivist', 'google-slides', 'Collect old photos into a slideshow.', ['find']),
+    t('memories', 'Photo slideshow', 'Archivist', 'live-slides', 'Collect old photos into a slideshow everyone can follow on their phones.', ['find']),
   ],
 }
 
@@ -93,10 +94,11 @@ export const INTEGRATION_LABEL: Record<Integration, string> = {
   'google-calendar': 'Google Calendar',
   'google-contacts': 'Google Contacts',
   'google-slides': 'Google Slides',
+  'live-slides': 'Live slides',
   web: 'Web search',
 }
 
-export const needsGoogle = (i: Integration) => i !== 'web'
+export const needsGoogle = (i: Integration) => i !== 'web' && i !== 'live-slides'
 
 // Every agent used across the workflows, with the integration it works through and one example job.
 export const AGENTS: { name: string; integration: Integration; example: string }[] = [

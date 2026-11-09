@@ -4,20 +4,25 @@ import {
   Calendar,
   Check,
   ChevronRight,
-  Contact,
   Globe,
   Loader2,
-  Mail,
   MapPin,
   MessageSquare,
-  Presentation,
   Sparkles,
   Users,
   UtensilsCrossed,
   Workflow,
 } from 'lucide-react'
-import type { ReactNode } from 'react'
-import { EVENT_TYPES } from '../data/workflows'
+import { useState, type ReactNode } from 'react'
+import { EVENT_TYPES, INTEGRATION_LABEL } from '../data/workflows'
+import { INTEGRATION_ICON, INTEGRATION_LOGO } from '../lib/icons'
+// Microsoft Fluent 3D emoji (MIT), from github.com/microsoft/fluentui-emoji.
+import businessArt from '../assets/fluent/business.png'
+import conferenceArt from '../assets/fluent/conference.png'
+import hackathonArt from '../assets/fluent/hackathon.png'
+import reunionArt from '../assets/fluent/reunion.png'
+import weddingArt from '../assets/fluent/wedding.png'
+import type { EventType, Integration } from '../types'
 
 const YEAR = new Date().getFullYear()
 
@@ -25,25 +30,39 @@ interface Props {
   onStart: () => void
 }
 
-export default function MarketingPage({ onStart }: Props) {
+interface PlanProps extends Props {
+  // Opens the sign-in form (onStart opens sign-up).
+  onSignIn: () => void
+  // Signs in and starts planning an event of this type.
+  onPlan: (type: EventType) => void
+}
+
+const REPO = 'https://github.com/KdotJo/Evently'
+
+export default function MarketingPage({ onStart, onSignIn, onPlan }: PlanProps) {
+  // The nav gets a solid backdrop once the page scrolls under it.
+  const [scrolled, setScrolled] = useState(false)
   return (
-    <div className="h-full overflow-y-auto bg-white text-gray-900">
-      <Nav onStart={onStart} />
+    <div
+      onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 8)}
+      className="h-full overflow-y-auto bg-white text-gray-900 motion-safe:scroll-smooth"
+    >
+      <Nav onStart={onStart} onSignIn={onSignIn} scrolled={scrolled} />
       <Hero onStart={onStart} />
       <EventStrip />
       <Features />
-      <Stats />
-      <Integrations />
-      <UseCases onStart={onStart} />
-      <FinalCta onStart={onStart} />
-      <Footer />
+      <Integrations onStart={onStart} />
+      <UseCases onStart={onStart} onPlan={onPlan} />
+      <HowItWorks />
+      <FinalCta onStart={onStart} onSignIn={onSignIn} />
+      <Footer onPlan={onPlan} />
     </div>
   )
 }
 
 /* ---------- shared bits ---------- */
 
-function Logo() {
+export function Logo() {
   return (
     <div className="flex items-center gap-2 text-lg font-bold tracking-tight">
       <span className="grid size-8 place-items-center rounded-full bg-accent text-white">
@@ -96,7 +115,7 @@ function Heading({ lead, rest, dark = false, className = '' }: { lead: string; r
   )
 }
 
-function GoogleG() {
+export function GoogleG() {
   return (
     <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
       <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.8z" />
@@ -109,10 +128,11 @@ function GoogleG() {
 
 /* ---------- sections ---------- */
 
-function Nav({ onStart }: Props) {
+function Nav({ onStart, onSignIn, scrolled }: Props & { onSignIn: () => void; scrolled: boolean }) {
+  const bar = scrolled ? 'bg-white/80 shadow-lg shadow-indigo-500/5 ring-1 ring-gray-900/5 backdrop-blur-md' : ''
   return (
-    <header className="group relative z-30 px-3 pt-2">
-      <div className="mx-auto flex max-w-7xl items-center gap-8 rounded-3xl px-6 py-3 transition duration-300 group-focus-within:bg-white group-focus-within:shadow-lg group-focus-within:shadow-indigo-500/5 group-focus-within:ring-1 group-focus-within:ring-gray-900/5 group-hover:bg-white group-hover:shadow-lg group-hover:shadow-indigo-500/5 group-hover:ring-1 group-hover:ring-gray-900/5">
+    <header className="group sticky top-0 z-30 px-3 pt-2">
+      <div className={`mx-auto flex max-w-7xl items-center gap-8 rounded-3xl px-4 py-3 transition duration-300 sm:px-6 ${bar} group-focus-within:bg-white group-focus-within:shadow-lg group-focus-within:shadow-indigo-500/5 group-focus-within:ring-1 group-focus-within:ring-gray-900/5 group-hover:bg-white group-hover:shadow-lg group-hover:shadow-indigo-500/5 group-hover:ring-1 group-hover:ring-gray-900/5`}>
         <Logo />
         <nav className="hidden items-center gap-7 text-sm font-medium text-gray-700 md:flex">
           <a href="#features" className="hover:text-accent">Product</a>
@@ -120,8 +140,8 @@ function Nav({ onStart }: Props) {
           <a href="#use-cases" className="hover:text-accent">Use cases</a>
           <a href="#how" className="hover:text-accent">How it works</a>
         </nav>
-        <div className="ml-auto flex items-center gap-2">
-          <button onClick={onStart} className="rounded-full px-4 py-2 text-sm font-semibold text-gray-700 hover:text-accent">
+        <div className="ml-auto flex items-center gap-1 whitespace-nowrap sm:gap-2">
+          <button onClick={onSignIn} className="rounded-full px-4 py-2 text-sm font-semibold text-gray-700 hover:text-accent">
             Sign in
           </button>
           <button
@@ -241,7 +261,7 @@ const band = (a: Curve, b: Curve) =>
 const FIBERS = Array.from({ length: 56 }, (_, i) => lerp(EDGE_IN, EDGE_OUT, i / 55))
 const FOLD_FIBERS = Array.from({ length: 22 }, (_, i) => lerp(FOLD_IN, FOLD_OUT, i / 21))
 
-function Ribbon() {
+export function Ribbon() {
   return (
     <div
       aria-hidden
@@ -313,9 +333,10 @@ function EventStrip() {
 
 function FeatureCard({ title, className = '', children }: { title: string; className?: string; children: ReactNode }) {
   return (
-    <div className={`flex flex-col overflow-hidden rounded-[32px] bg-white ring-1 ring-gray-900/5 ${className}`}>
-      <h3 className="p-7 pb-0 text-2xl font-semibold tracking-tight">{title}</h3>
-      <div className="relative flex flex-1 items-end p-7">{children}</div>
+    // Not positioned below the card itself, so each card's gradient wash fills it edge to edge.
+    <div className={`relative flex flex-col overflow-hidden rounded-[32px] bg-white ring-1 ring-gray-900/5 ${className}`}>
+      <h3 className="relative z-10 p-7 pb-0 text-2xl font-semibold tracking-tight">{title}</h3>
+      <div className="flex flex-1 items-end p-7">{children}</div>
     </div>
   )
 }
@@ -421,6 +442,14 @@ function Features() {
                 <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold text-accent">
                   <span className="size-1.5 animate-pulse rounded-full bg-accent" /> Live
                 </div>
+                <div className="mt-3 flex flex-col gap-1">
+                  <a href="#/present/demo" className="flex items-center gap-0.5 font-semibold text-accent hover:underline">
+                    Try the demo <ChevronRight size={13} />
+                  </a>
+                  <a href="#/present/new" className="flex items-center gap-0.5 font-semibold text-accent hover:underline">
+                    Upload your slides <ChevronRight size={13} />
+                  </a>
+                </div>
               </div>
             </div>
           </FeatureCard>
@@ -430,44 +459,14 @@ function Features() {
   )
 }
 
-function Stats() {
-  const stats = [
-    ['5', 'event types with ready-made workflows'],
-    ['50+', 'planning steps across all templates'],
-    ['6', 'integrations, from Maps to Slides'],
-    ['1', 'conversation to plan the whole thing'],
-  ]
-  return (
-    <section className="relative overflow-hidden py-28">
-      <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-72 bg-[radial-gradient(ellipse_at_bottom,#c7d2fe,transparent_70%)]" />
-      <div className="relative mx-auto max-w-7xl px-6">
-        <h2 className="mx-auto max-w-2xl text-center text-4xl font-bold tracking-tight sm:text-5xl">The fastest way from idea to run sheet</h2>
-        <div className="mt-16 grid gap-y-10 border-y border-gray-900/5 py-12 sm:grid-cols-2 lg:grid-cols-4">
-          {stats.map(([n, l], i) => (
-            <div key={l} className="text-center">
-              <div className={`text-5xl font-bold tracking-tight ${i === 0 ? 'text-gray-900' : 'text-gray-400'}`}>{n}</div>
-              <div className={`mx-auto mt-2 max-w-48 text-sm ${i === 0 ? 'text-gray-900' : 'text-gray-500'}`}>{l}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function Integrations() {
-  const tools = [
-    { label: 'Google Maps', icon: MapPin, pos: 'left-[6%] top-[12%]' },
-    { label: 'Gmail', icon: Mail, pos: 'right-[6%] top-[12%]' },
-    { label: 'Calendar', icon: Calendar, pos: 'left-0 top-1/2 -translate-y-1/2' },
-    { label: 'Contacts', icon: Contact, pos: 'right-0 top-1/2 -translate-y-1/2' },
-    { label: 'Slides', icon: Presentation, pos: 'left-[6%] bottom-[12%]' },
-    { label: 'Web search', icon: Globe, pos: 'right-[6%] bottom-[12%]' },
-  ]
-  const how = [
-    { icon: MessageSquare, title: 'Tell Evently about your event.', body: 'Pick a type or describe it in a sentence. You get a full workflow in seconds.' },
-    { icon: Workflow, title: 'Shape the workflow.', body: 'Add, remove or reorder steps by chatting. The flowchart updates as you go.' },
-    { icon: Bot, title: 'Let the agents run.', body: 'Each step gets an agent that researches, drafts and reports back for your approval.' },
+function Integrations({ onStart }: Props) {
+  const tools: { id: Integration; pos: string }[] = [
+    { id: 'google-maps', pos: 'sm:left-[6%] sm:top-[12%]' },
+    { id: 'gmail', pos: 'sm:right-[6%] sm:top-[12%]' },
+    { id: 'google-calendar', pos: 'sm:left-0 sm:top-1/2 sm:-translate-y-1/2' },
+    { id: 'google-contacts', pos: 'sm:right-0 sm:top-1/2 sm:-translate-y-1/2' },
+    { id: 'google-slides', pos: 'sm:left-[6%] sm:bottom-[12%]' },
+    { id: 'web', pos: 'sm:right-[6%] sm:bottom-[12%]' },
   ]
   return (
     <section id="integrations" className="relative overflow-hidden bg-[#0f1033] py-28 text-white">
@@ -479,14 +478,13 @@ function Integrations() {
           rest="Connect your Google account once and every agent can search, draft and schedule on your behalf."
           className="max-w-4xl"
         />
-        <div className="mt-10 flex flex-wrap gap-3">
-          <PrimaryButton>Connect Google</PrimaryButton>
-          <button className="rounded-full px-6 py-3 text-sm font-semibold text-white ring-1 ring-white/20 hover:ring-white/50">See all integrations</button>
+        <div className="mt-10">
+          <PrimaryButton onClick={onStart}>Connect Google</PrimaryButton>
         </div>
 
-        {/* Hub diagram */}
-        <div className="relative mx-auto mt-20 h-80 max-w-3xl rounded-[40px] bg-[radial-gradient(#ffffff14_1px,transparent_1px)] [background-size:16px_16px]">
-          <svg className="absolute inset-0 size-full" aria-hidden>
+        {/* Hub diagram; a plain list of pills on phones, where the spokes would overlap */}
+        <div className="relative mx-auto mt-14 flex max-w-3xl flex-wrap justify-center gap-3 sm:mt-20 sm:block sm:h-80 rounded-[40px] bg-[radial-gradient(#ffffff14_1px,transparent_1px)] [background-size:16px_16px]">
+          <svg className="absolute inset-0 hidden size-full sm:block" aria-hidden>
             {[
               ['20%', '22%'],
               ['80%', '22%'],
@@ -498,54 +496,33 @@ function Integrations() {
               <line key={x + y} x1="50%" y1="50%" x2={x} y2={y} stroke="#818cf8" strokeOpacity="0.5" strokeDasharray="3 5" />
             ))}
           </svg>
-          <div className="absolute top-1/2 left-1/2 grid size-24 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-[28px] bg-gradient-to-br from-indigo-500 to-violet-600 shadow-2xl shadow-indigo-500/50">
+          <div className="absolute top-1/2 left-1/2 hidden size-24 sm:grid -translate-x-1/2 -translate-y-1/2 place-items-center rounded-[28px] bg-gradient-to-br from-indigo-500 to-violet-600 shadow-2xl shadow-indigo-500/50">
             <Sparkles size={30} />
           </div>
-          {tools.map(({ label, icon: Icon, pos }) => (
-            <div key={label} className={`absolute flex items-center gap-2 rounded-full bg-indigo-500/90 px-4 py-2 text-sm font-medium shadow-lg ${pos}`}>
-              <Icon size={14} /> {label}
-            </div>
-          ))}
-        </div>
-
-        <div id="how" className="mt-28 border-t border-white/10 pt-20">
-          <Heading dark lead="How it works." rest="Three steps from blank page to booked." className="max-w-3xl" />
-          <div className="mt-14 grid gap-6 md:grid-cols-3">
-            {how.map(({ icon: Icon, title, body }, i) => (
-              <div key={title} className="rounded-[32px] bg-white/5 p-7 ring-1 ring-white/10">
-                <div className="mb-6 flex items-center gap-3">
-                  <span className="grid size-11 place-items-center rounded-full bg-indigo-500/20 text-indigo-300 ring-1 ring-indigo-400/30">
-                    <Icon size={18} />
-                  </span>
-                  <span className="font-mono text-xs text-indigo-300/70">0{i + 1}</span>
-                </div>
-                <p className="leading-relaxed">
-                  <b className="font-semibold">{title}</b> <span className="text-indigo-100/60">{body}</span>
-                </p>
+          {tools.map(({ id, pos }) => {
+            const Icon = INTEGRATION_ICON[id]
+            const logo = INTEGRATION_LOGO[id]
+            return (
+              <div key={id} className={`flex items-center gap-2 rounded-full bg-white sm:absolute px-4 py-2 text-sm font-medium text-gray-900 shadow-lg shadow-black/30 ${pos}`}>
+                {logo ? <img src={logo} alt="" className="size-4 object-contain" /> : <Icon size={14} className="text-gray-500" />}
+                <span className="whitespace-nowrap">{INTEGRATION_LABEL[id]}</span>
               </div>
-            ))}
-          </div>
-
-          <div className="mt-6 overflow-hidden rounded-[32px] bg-black/30 p-6 font-mono text-xs leading-6 ring-1 ring-white/10">
-            <div className="text-indigo-300">› evently run hackathon --people 200 --city Austin</div>
-            <div className="text-white/50">  ✓ Venue Scout      3 venues match · 24h access · Wi-Fi</div>
-            <div className="text-white/50">  ✓ Sponsor Hunter   12 companies shortlisted · drafts ready</div>
-            <div className="text-white/50">  ◌ Caterer          requesting quotes near The Foundry…</div>
-            <div className="text-white/50">  · Scheduler        waiting on Location, Judges</div>
-          </div>
+            )
+          })}
         </div>
       </div>
     </section>
   )
 }
 
-function UseCases({ onStart }: Props) {
+function UseCases({ onStart, onPlan }: Props & Pick<PlanProps, 'onPlan'>) {
+  // top/mid: card gradient stops; glow: the object's floor shadow.
   const cases = [
-    { type: 'hackathon', grad: 'from-indigo-600 via-violet-600 to-fuchsia-500', line: 'Sponsors, prizes, judges and a 24-hour schedule.' },
-    { type: 'conference', grad: 'from-sky-500 via-indigo-500 to-violet-600', line: 'Speakers, tracks, ticketing and hotel blocks.' },
-    { type: 'wedding', grad: 'from-pink-400 via-rose-400 to-violet-500', line: 'Venue, vendors, guest list and the day-of timeline.' },
-    { type: 'business', grad: 'from-slate-800 via-indigo-800 to-indigo-500', line: 'Offsites and launches with invites and follow-ups.' },
-    { type: 'reunion', grad: 'from-amber-300 via-pink-400 to-indigo-500', line: 'Find old friends, poll a date, share the photos.' },
+    { type: 'hackathon', art: hackathonArt, top: '#c4b5fd', mid: '#ede9fe', glow: '#7c3aed', line: 'Sponsors, prizes, judges and a 24-hour schedule.' },
+    { type: 'conference', art: conferenceArt, top: '#93c5fd', mid: '#e0efff', glow: '#2563eb', line: 'Speakers, tracks, ticketing and hotel blocks.' },
+    { type: 'wedding', art: weddingArt, top: '#f9a8d4', mid: '#fde4f1', glow: '#db2777', line: 'Venue, vendors, guest list and the day-of timeline.' },
+    { type: 'business', art: businessArt, top: '#818cf8', mid: '#e0e7ff', glow: '#4338ca', line: 'Offsites and launches with invites and follow-ups.' },
+    { type: 'reunion', art: reunionArt, top: '#fdc29a', mid: '#fbe3ef', glow: '#e1497f', line: 'Find old friends, poll a date, share the photos.' },
   ] as const
   return (
     <section id="use-cases" className="py-28">
@@ -562,19 +539,36 @@ function UseCases({ onStart }: Props) {
           </p>
         </div>
 
-        <div className="-mx-6 mt-14 flex snap-x gap-4 overflow-x-auto px-6 pb-4">
-          {cases.map(({ type, grad, line }) => {
+        <div className="-mx-6 mt-14 flex snap-x gap-4 overflow-x-auto px-6 pb-4 lg:mx-0 lg:grid lg:grid-cols-5 lg:overflow-visible lg:px-0 lg:pb-0">
+          {cases.map(({ type, art, top, mid, glow, line }) => {
             const meta = EVENT_TYPES.find((e) => e.id === type)!
             return (
-              <div key={type} className="w-72 shrink-0 snap-start">
-                <div className={`relative flex h-96 items-end overflow-hidden rounded-[32px] bg-gradient-to-br p-6 ${grad}`}>
-                  <span className="absolute top-8 left-1/2 -translate-x-1/2 text-8xl opacity-90 drop-shadow-xl">{meta.emoji}</span>
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,#ffffff40,transparent_50%)]" />
-                  <span className="relative text-2xl font-bold text-white">{meta.label}</span>
+              <div
+                key={type}
+                className="group relative flex h-[27rem] w-72 shrink-0 snap-start flex-col overflow-hidden rounded-[32px] shadow-xl ring-1 shadow-indigo-500/10 ring-gray-900/5 lg:w-auto"
+                style={{ background: `linear-gradient(170deg, ${top} 0%, ${mid} 55%, #f8f7ff 100%)` }}
+              >
+                <Swooshes />
+                <div className="relative h-56 shrink-0">
+                  <Orbit half="back" />
+                  <span
+                    aria-hidden
+                    className="absolute bottom-11 left-1/2 h-4 w-28 -translate-x-1/2 rounded-[50%] opacity-40 blur-md transition duration-500 group-hover:w-24 group-hover:opacity-30"
+                    style={{ background: glow }}
+                  />
+                  <img
+                    src={art}
+                    alt=""
+                    className="absolute top-[44%] left-1/2 size-32 -translate-x-1/2 -translate-y-1/2 -rotate-6 drop-shadow-[0_20px_16px_rgba(30,27,75,0.28)] transition duration-500 select-none motion-safe:group-hover:-translate-y-[58%] motion-safe:group-hover:rotate-0"
+                  />
+                  <Orbit half="front" />
                 </div>
-                <p className="mt-4 text-gray-700">{line}</p>
-                <div className="mt-3">
-                  <TextLink onClick={onStart}>Plan a {meta.label.toLowerCase()}</TextLink>
+                <div className="relative mt-auto p-6">
+                  <h3 className="text-2xl font-bold tracking-tight text-gray-900">{meta.label}</h3>
+                  <p className="mt-2 text-sm leading-relaxed text-gray-600">{line}</p>
+                  <div className="mt-4">
+                    <TextLink onClick={() => onPlan(type)}>Plan a {meta.label.toLowerCase()}</TextLink>
+                  </div>
                 </div>
               </div>
             )
@@ -602,7 +596,87 @@ function UseCases({ onStart }: Props) {
   )
 }
 
-function FinalCta({ onStart }: Props) {
+// A tilted ring around a use-case object. Drawn in two halves so the object sits inside it:
+// the back arc goes under the object, the front arc over it.
+function Orbit({ half }: { half: 'back' | 'front' }) {
+  const id = `orbit-${half}`
+  const arc = half === 'back' ? 'M8 30 A92 20 0 0 1 192 30' : 'M8 30 A92 20 0 0 0 192 30'
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 200 60"
+      className={`pointer-events-none absolute inset-x-3 top-[60%] -translate-y-1/2 -rotate-12 overflow-visible ${half === 'front' ? 'z-10' : ''}`}
+    >
+      <defs>
+        <linearGradient id={id} x1="0" x2="1">
+          <stop offset="0" stopColor="#fff" stopOpacity="0" />
+          <stop offset="0.5" stopColor="#fff" stopOpacity={half === 'front' ? 0.95 : 0.55} />
+          <stop offset="1" stopColor="#fff" stopOpacity="0" />
+        </linearGradient>
+        <filter id={`${id}-glow`} x="-10%" y="-50%" width="120%" height="200%">
+          <feGaussianBlur stdDeviation="2.5" />
+        </filter>
+      </defs>
+      <g fill="none" stroke={`url(#${id})`} strokeLinecap="round">
+        <path d={arc} strokeWidth="5" filter={`url(#${id}-glow)`} />
+        <path d={arc} strokeWidth="2" />
+      </g>
+    </svg>
+  )
+}
+
+// Soft white curves across a use-case card's background.
+function Swooshes() {
+  return (
+    <svg aria-hidden viewBox="0 0 300 440" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 size-full">
+      <path d="M-20 250 C 70 190 190 300 320 170 L320 440 L-20 440 Z" fill="#fff" opacity="0.28" />
+      <path d="M-20 330 C 110 270 210 370 320 290 L320 440 L-20 440 Z" fill="#fff" opacity="0.3" />
+      <path d="M-20 110 C 60 50 200 150 320 30" fill="none" stroke="#fff" strokeOpacity="0.45" strokeWidth="1.2" />
+      <path d="M-20 175 C 90 120 180 210 320 110" fill="none" stroke="#fff" strokeOpacity="0.25" strokeWidth="1" />
+    </svg>
+  )
+}
+
+function HowItWorks() {
+  const how = [
+    { icon: MessageSquare, title: 'Tell Evently about your event.', body: 'Pick a type or describe it in a sentence. You get a full workflow in seconds.' },
+    { icon: Workflow, title: 'Shape the workflow.', body: 'Add, remove or reorder steps by chatting. The flowchart updates as you go.' },
+    { icon: Bot, title: 'Let the agents run.', body: 'Each step gets an agent that researches, drafts and reports back for your approval.' },
+  ]
+  return (
+    <section id="how" className="relative overflow-hidden bg-[#0f1033] py-28 text-white">
+      <div aria-hidden className="pointer-events-none absolute top-0 -left-40 h-[500px] w-[900px] rounded-full bg-[conic-gradient(from_0deg,#6366f1,#ec4899,#8b5cf6,#38bdf8,#6366f1)] opacity-20 blur-3xl" />
+      <div className="relative mx-auto max-w-7xl px-6">
+        <Heading dark lead="How it works." rest="Three steps from blank page to booked." className="max-w-3xl" />
+        <div className="mt-14 grid gap-6 md:grid-cols-3">
+          {how.map(({ icon: Icon, title, body }, i) => (
+            <div key={title} className="rounded-[32px] bg-white/5 p-7 ring-1 ring-white/10">
+              <div className="mb-6 flex items-center gap-3">
+                <span className="grid size-11 place-items-center rounded-full bg-indigo-500/20 text-indigo-300 ring-1 ring-indigo-400/30">
+                  <Icon size={18} />
+                </span>
+                <span className="font-mono text-xs text-indigo-300/70">0{i + 1}</span>
+              </div>
+              <p className="leading-relaxed">
+                <b className="font-semibold">{title}</b> <span className="text-indigo-100/60">{body}</span>
+              </p>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-6 overflow-x-auto rounded-[32px] bg-black/30 p-6 font-mono text-xs leading-6 whitespace-pre ring-1 ring-white/10">
+          <div className="text-indigo-300">› evently run hackathon --people 200 --city Austin</div>
+          <div className="text-white/50">  ✓ Venue Scout      3 venues match · 24h access · Wi-Fi</div>
+          <div className="text-white/50">  ✓ Sponsor Hunter   12 companies shortlisted · drafts ready</div>
+          <div className="text-white/50">  ◌ Caterer          requesting quotes near The Foundry…</div>
+          <div className="text-white/50">  · Scheduler        waiting on Location, Judges</div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function FinalCta({ onStart, onSignIn }: Props & { onSignIn: () => void }) {
   return (
     <section className="bg-gray-50/70 py-24">
       <div className="mx-auto grid max-w-7xl gap-12 px-6 lg:grid-cols-[1.4fr_1fr_1fr]">
@@ -611,7 +685,7 @@ function FinalCta({ onStart }: Props) {
           <p className="mt-4 max-w-md text-lg text-gray-500">Create an account in seconds and get your first workflow before your coffee cools.</p>
           <div className="mt-8 flex flex-wrap gap-3">
             <PrimaryButton onClick={onStart}>Start now</PrimaryButton>
-            <SecondaryButton onClick={onStart}>Sign in</SecondaryButton>
+            <SecondaryButton onClick={onSignIn}>Sign in</SecondaryButton>
           </div>
         </div>
         <div>
@@ -639,17 +713,34 @@ function FinalCta({ onStart }: Props) {
   )
 }
 
-function Footer() {
-  const cols = {
-    Product: ['Workflows', 'Agents', 'Integrations', 'Live slides', 'Pricing'],
-    'Use cases': ['Hackathons', 'Conferences', 'Weddings', 'Business events', 'Reunions'],
-    Resources: ['Guides', 'Templates', 'Help center', 'Changelog'],
-    Company: ['About', 'Careers', 'Contact', 'Privacy', 'Terms'],
+type FooterLink = { label: string } & ({ href: string } | { onClick: () => void })
+
+function Footer({ onPlan }: Pick<PlanProps, 'onPlan'>) {
+  const plan = (type: EventType, label: string): FooterLink => ({ label, onClick: () => onPlan(type) })
+  const cols: Record<string, FooterLink[]> = {
+    Product: [
+      { label: 'Workflows', href: '#features' },
+      { label: 'Agents', href: '#how' },
+      { label: 'Integrations', href: '#integrations' },
+      { label: 'Live slides', href: '#features' },
+    ],
+    'Use cases': [
+      plan('hackathon', 'Hackathons'),
+      plan('conference', 'Conferences'),
+      plan('wedding', 'Weddings'),
+      plan('business', 'Business events'),
+      plan('reunion', 'Reunions'),
+    ],
+    Resources: [
+      { label: 'Templates', href: '#use-cases' },
+      { label: 'GitHub', href: REPO },
+      { label: 'Report an issue', href: `${REPO}/issues` },
+    ],
   }
   return (
     <footer className="border-t border-gray-900/5 bg-white">
       <div className="mx-auto max-w-7xl px-6 py-20">
-        <div className="grid gap-12 md:grid-cols-[1.5fr_repeat(4,1fr)]">
+        <div className="grid gap-12 md:grid-cols-[1.5fr_repeat(3,1fr)]">
           <div>
             <Logo />
             <p className="mt-4 max-w-xs text-sm text-gray-500">AI agents that plan, coordinate and streamline your events.</p>
@@ -665,8 +756,20 @@ function Footer() {
               <h4 className="text-sm font-semibold">{h}</h4>
               <ul className="mt-4 space-y-2.5 text-sm text-gray-500">
                 {links.map((l) => (
-                  <li key={l}>
-                    <a href="#" className="hover:text-accent">{l}</a>
+                  <li key={l.label}>
+                    {'href' in l ? (
+                      <a
+                        href={l.href}
+                        className="hover:text-accent"
+                        {...(l.href.startsWith('http') && { target: '_blank', rel: 'noreferrer' })}
+                      >
+                        {l.label}
+                      </a>
+                    ) : (
+                      <button onClick={l.onClick} className="hover:text-accent">
+                        {l.label}
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>

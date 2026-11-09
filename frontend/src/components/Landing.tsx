@@ -1,8 +1,9 @@
-import { ArrowRight, ArrowUp, Clock, Compass, Plus, Puzzle, Sparkles, Wrench, type LucideIcon } from 'lucide-react'
+import { ArrowRight, ArrowUp, Clock, Compass, LogOut, Plus, Puzzle, Sparkles, Wrench, type LucideIcon } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { AGENTS, EVENT_TYPES, INTEGRATION_LABEL } from '../data/workflows'
 import { INTEGRATION_ICON, INTEGRATION_LOGO, agentIcon } from '../lib/icons'
-import { loadRecent } from '../lib/recent'
+import type { User } from '../lib/auth'
+import { loadRecent, type RecentEvent } from '../lib/recent'
 import type { EventType, Integration } from '../types'
 
 type View = 'new' | 'tools' | 'plugins' | 'explore'
@@ -33,10 +34,13 @@ const ago = (t: number) => {
 
 interface Props {
   onPick: (type: EventType, note?: string) => void
+  onResume: (event: RecentEvent) => void
   onHome: () => void
+  user: User | null
+  onSignOut: () => void
 }
 
-export default function Landing({ onPick, onHome }: Props) {
+export default function Landing({ onPick, onResume, onHome, user, onSignOut }: Props) {
   const [draft, setDraft] = useState('')
   const [view, setView] = useState<View>('new')
   const [recent] = useState(loadRecent)
@@ -82,8 +86,8 @@ export default function Landing({ onPick, onHome }: Props) {
             {recent.length ? (
               recent.map((r) => (
                 <button
-                  key={r.at}
-                  onClick={() => onPick(r.type, r.note)}
+                  key={r.id}
+                  onClick={() => onResume(r)}
                   title={r.note ?? label(r.type)}
                   className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 hover:text-ink"
                 >
@@ -97,6 +101,26 @@ export default function Landing({ onPick, onHome }: Props) {
             )}
           </div>
         </div>
+
+        {user && (
+          <div className="mt-3 flex items-center gap-2.5 border-t border-line px-2 pt-3">
+            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-bold text-accent">
+              {user.name
+                .split(' ')
+                .map((w) => w[0])
+                .slice(0, 2)
+                .join('')
+                .toUpperCase()}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold">{user.name}</div>
+              <div className="truncate text-xs text-muted">{user.email}</div>
+            </div>
+            <button onClick={onSignOut} title="Sign out" aria-label="Sign out" className="rounded-lg p-1.5 text-muted hover:bg-gray-100 hover:text-ink">
+              <LogOut size={15} />
+            </button>
+          </div>
+        )}
       </aside>
 
       {/* .glow clips its blurred backdrop with overflow: hidden, so scrolling lives on the inner div. */}

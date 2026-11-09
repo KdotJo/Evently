@@ -1,6 +1,6 @@
 import {
   Archive, Bot, Building, Calendar, CalendarClock, ClipboardCheck, ClipboardList, Clapperboard, Contact, Globe, Handshake,
-  Hotel, ListChecks, Mail, MapPin, Mic, Presentation, Send, Store, Trophy, UserPlus, UserSearch, Users, UtensilsCrossed, Wifi,
+  Hotel, ListChecks, Mail, MapPin, Mic, Presentation, QrCode, Send, Store, Trophy, UserPlus, UserSearch, Users, UtensilsCrossed, Wifi,
   type LucideIcon,
 } from 'lucide-react'
 import calendarLogo from '../assets/google/calendar.png'
@@ -26,6 +26,7 @@ export const INTEGRATION_ICON: Record<Integration, LucideIcon> = {
   'google-calendar': Calendar,
   'google-contacts': Contact,
   'google-slides': Presentation,
+  'live-slides': QrCode,
   web: Globe,
 }
 

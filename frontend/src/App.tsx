@@ -3,14 +3,17 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import ChatPanel from './components/ChatPanel'
 import IntakePage from './components/IntakePage'
 import Landing from './components/Landing'
+import LoginPage, { type AuthMode } from './components/LoginPage'
 import MarketingPage from './components/MarketingPage'
 import PlanLoader from './components/PlanLoader'
 import WorkflowCanvas from './components/WorkflowCanvas'
 import { DEFAULT_HEADCOUNT, EVENT_TYPES, buildWorkflow, needsGoogle } from './data/workflows'
 import { runAgent } from './lib/agents'
+import { loadUser, signOut, type User } from './lib/auth'
 import { interpret, type ChatAction } from './lib/chat'
 import { extractAnswers, mergeFound } from './lib/extract'
-import { addRecent } from './lib/recent'
+import { newDeckId } from './lib/deckStore'
+import { addRecent, savePlan, type RecentEvent, type Review } from './lib/recent'
 import { BUILD_NOW, QUESTIONS, SKIP, isRequired, missingRequired, nextQuestion, type IntakeAnswers } from './lib/intake'
 import type { ChatMessage, EventDetails, EventType, Task, TaskResult } from './types'
 
@@ -61,9 +64,15 @@ function applyAction(tasks: Task[], a: ChatAction): Task[] {
 }
 
 export default function App() {
-  // TODO: replace with real auth (Google sign-in) once the backend exists.
+  // Mock account (see lib/auth). `signedIn` means past the marketing page, into the app.
+  const [user, setUser] = useState<User | null>(loadUser)
   const [signedIn, setSignedIn] = useState(false)
+  // Sign-in / sign-up form on screen, and the event type to start once it's done.
+  const [auth, setAuth] = useState<AuthMode | null>(null)
+  const [pendingType, setPendingType] = useState<EventType | null>(null)
   const [event, setEvent] = useState<EventDetails | null>(null)
+  // Scopes this plan's live-slide decks, so a new plan doesn't reuse the last one's slides.
+  const [planId, setPlanId] = useState('')
   const [tasks, setTasks] = useState<Task[]>([])
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -87,12 +96,15 @@ export default function App() {
   const [intakeInfo, setIntakeInfo] = useState<string | null>(null)
   // Bumped on every pick, so a slow extraction for an abandoned event is ignored.
   const pickSeq = useRef(0)
+  // Approve / ignore choices and checklist progress from the node map, saved with the plan.
+  const [review, setReview] = useState<Review>({ decisions: {}, progress: {} })
   const started = useRef(new Set<string>())
 
   const pick = (type: EventType, note?: string) => {
     const meta = EVENT_TYPES.find((e) => e.id === type)!
     const wf = buildWorkflow(type)
-    addRecent({ type, note })
+    const id = newDeckId()
+    addRecent({ id, type, note })
     // Pull headcount / city out of a free-text landing prompt like "200-person hackathon in Austin".
     const patch = Object.assign(
       {},
@@ -100,6 +112,8 @@ export default function App() {
     )
     setEvent({ type, headcount: DEFAULT_HEADCOUNT[type], city: 'San Francisco', date: '', ...patch })
     setTasks(wf)
+    setPlanId(id)
+    setReview({ decisions: {}, progress: {} })
     setSelectedId(null)
     setRunning(false)
     setApproved(false)
@@ -133,6 +147,35 @@ export default function App() {
       })
       .finally(() => seq === pickSeq.current && setExtracting(false))
   }
+
+  // Reopens a recent event on the node map as it was saved; one that never got that far starts over.
+  const resume = (r: RecentEvent) => {
+    if (!r.plan) return pick(r.type, r.note)
+    const p = r.plan
+    ++pickSeq.current
+    started.current.clear()
+    setEvent(p.event)
+    setTasks(p.tasks)
+    setMessages(p.messages)
+    setAnswers(p.answers)
+    setApproved(p.approved)
+    // Plans saved before checklist progress existed have `checked` instead; the map converts it.
+    setReview({ ...p.review, progress: p.review.progress ?? {} })
+    setPlanId(r.id)
+    setSelectedId(null)
+    setRunning(false)
+    setBuilding(false)
+    setIntake(false)
+    setExtracting(false)
+    setChatOpen(false)
+    setSeen(p.messages.filter((m) => m.role === 'assistant').length)
+  }
+
+  // Save the plan whenever it changes on the node map, so Recent Events reopens it there.
+  const onMap = !!event && !intake && !building
+  useEffect(() => {
+    if (onMap && event && planId) savePlan(planId, { event, tasks, messages, answers, approved, review })
+  }, [onMap, event, tasks, messages, answers, approved, review, planId])
 
   // Ends the questions and draws the plan. The draft message waits in the chat as an unread message.
   const finishIntake = (steps = tasks.length) => {
@@ -295,8 +338,43 @@ export default function App() {
     setTasks((ts) => ts.map((t) => (t.status === 'blocked' ? { ...t, status: 'idle', blockedBy: undefined } : t)))
   }
 
-  if (!signedIn) return <MarketingPage onStart={() => setSignedIn(true)} />
-  if (!event) return <Landing onPick={pick} onHome={() => setSignedIn(false)} />
+  // Already signed in: skip the form and go straight into the app.
+  const enter = (mode: AuthMode, type?: EventType) => {
+    if (!user) {
+      setPendingType(type ?? null)
+      return setAuth(mode)
+    }
+    setSignedIn(true)
+    if (type) pick(type)
+  }
+
+  const signedInAs = (u: User) => {
+    setUser(u)
+    setAuth(null)
+    setSignedIn(true)
+    // Google sign-in also grants the Maps / Gmail / Calendar access the agents use.
+    if (u.provider === 'google') setGoogleConnected(true)
+    if (pendingType) pick(pendingType)
+    setPendingType(null)
+  }
+
+  const logOut = () => {
+    signOut()
+    setUser(null)
+    setSignedIn(false)
+    setGoogleConnected(false)
+    setEvent(null)
+  }
+
+  if (!signedIn) {
+    if (auth)
+      return <LoginPage mode={auth} onMode={setAuth} onDone={signedInAs} onBack={() => setAuth(null)} />
+    return (
+      <MarketingPage onStart={() => enter('signup')} onSignIn={() => enter('signin')} onPlan={(type) => enter('signup', type)} />
+    )
+  }
+  if (!event)
+    return <Landing onPick={pick} onResume={resume} onHome={() => setSignedIn(false)} user={user} onSignOut={logOut} />
   if (intake)
     return (
       <IntakePage
@@ -326,7 +404,11 @@ export default function App() {
   return (
     <main className="relative h-full bg-gray-100 p-3">
       <WorkflowCanvas
+        key={planId}
+        initialReview={review}
+        onReviewChange={setReview}
         event={event}
+        planId={planId}
         onBack={() => setEvent(null)}
         onRunTask={runTask}
         onAddOption={addOption}

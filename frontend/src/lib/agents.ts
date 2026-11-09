@@ -172,9 +172,27 @@ function byTask(task: Task, ev: EventDetails): TaskResult[] | null {
       ])
     case 'dayof':
       return simple([
-        ['Live slides + QR', 'Google Slides', 'Attendees follow along on their phones.', ['Generate the deck', 'Print QR posters']],
         ['Volunteer roster', '12 shifts', 'Check-in, food, help desk and cleanup.', ['Recruit volunteers', 'Send the shift sheet']],
         ['Run sheet', 'Minute-by-minute', 'One page for the organizing team.', ['Share with leads', 'Do a walk-through the day before']],
+      ])
+    case 'slides':
+      return ev.type === 'conference'
+        ? simple([
+            ['Session decks', 'One per talk', 'Each speaker presents from Evently, so every room gets its own QR code.', ['Collect PDFs from speakers', 'Print a QR poster per room', 'Test the projector in each hall']],
+            ['Opening keynote deck', 'Draft ready', 'Welcome, schedule, Wi-Fi and sponsors.', ['Review the slides', 'Rehearse the keynote']],
+          ])
+        : simple([
+            ['Kickoff deck', 'Draft ready', 'Welcome, schedule, Wi-Fi, prizes and judging, drafted from your plan.', ['Review the slides', 'Print QR posters for the room', 'Test the projector']],
+            ['Demo-day deck', 'Order of teams', 'One slide per team, so the room knows who’s up next.', ['Collect team names after submissions', 'Add a slide per team']],
+          ])
+    case 'presentation':
+      return simple([
+        ['Agenda deck', 'Draft ready', 'Objectives, agenda and logistics, drafted from your plan.', ['Review the slides', 'Add the speakers’ sections', 'Share the QR code at the start']],
+        ['Your own deck', 'Upload a PDF', 'Already have slides? Present them from Evently so the room can follow along.', ['Export the deck as PDF', 'Upload it with the Upload button above']],
+      ])
+    case 'memories':
+      return simple([
+        ['Photo slideshow', 'Upload photos', 'Collect old photos and play them as a slideshow everyone can follow on their phones.', ['Ask guests to send photos', 'Upload them, one per slide', 'Put the QR code on the tables']],
       ])
   }
   return null
