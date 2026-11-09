@@ -2,7 +2,11 @@ import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 import { AlertTriangle, Check, ChevronUp, ExternalLink, Link2, Loader2, Mail, Phone, Plus, RotateCw, Star, Users, X } from 'lucide-react'
 import { useState, type FormEvent, type MouseEvent } from 'react'
 import type { Field, FieldKey } from '../lib/options'
-import type { TaskResult } from '../types'
+import { resultActionsFor } from '../lib/resultActions'
+import type { RunnerContext } from '../lib/runners'
+import type { EventDetails, Task, TaskResult } from '../types'
+import { venueActivity, venueExtra } from '../features/venues/model'
+import VenueDetails, { VenueProgressBar, VenueProgressLine } from '../features/venues/VenueDetails'
 
 export type Decision = 'approved' | 'ignored'
 
@@ -16,6 +20,10 @@ export type ResultItem =
 
 export interface ResultNodeData extends Record<string, unknown> {
   item: ResultItem
+  // The step this option belongs to, the event, and the backend context (null for sample-only plans).
+  task: Task
+  event: EventDetails
+  ctx: RunnerContext | null
   size: { w: number; h: number }
   expanded: boolean
   city: string
@@ -27,6 +35,8 @@ export interface ResultNodeData extends Record<string, unknown> {
   onConnectGoogle: () => void
   onRetry: () => void
   onAdd: (values: Partial<Record<FieldKey, string>>) => void
+  // Replace this option in its step (matched by cardId, else title).
+  onUpdateResult: (next: TaskResult) => void
 }
 
 export type ResultNodeType = Node<ResultNodeData, 'result'>
@@ -42,7 +52,7 @@ const TONE = {
 } as const
 
 const mapsUrl = (r: TaskResult, city: string) =>
-  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${r.title} ${r.address ?? city}`)}`
+  venueExtra(r)?.mapsUrl ?? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${r.title} ${r.address ?? city}`)}`
 
 export default function ResultNode({ data }: NodeProps<ResultNodeType>) {
   const { item, size, expanded, onConnectGoogle } = data
@@ -53,7 +63,7 @@ export default function ResultNode({ data }: NodeProps<ResultNodeType>) {
     <div
       style={{ width: size.w, height: size.h }}
       onClick={clickable ? data.onOpen : stop}
-      className={`nodrag nopan flex flex-col overflow-hidden rounded-2xl ring-1 transition-[background-color,box-shadow] duration-300 ${tone} ${
+      className={`nodrag nopan relative flex flex-col overflow-hidden rounded-2xl ring-1 transition-[background-color,box-shadow] duration-300 ${tone} ${
         expanded ? 'shadow-xl outline-2 outline-offset-3 outline-accent' : 'shadow-md hover:shadow-lg'
       } ${item.kind === 'add' && !expanded ? 'border-2 border-dashed border-accent/40 hover:border-accent' : ''} ${clickable ? 'cursor-pointer' : 'cursor-default'}`}
     >
@@ -118,6 +128,7 @@ export default function ResultNode({ data }: NodeProps<ResultNodeType>) {
         <>
           <Summary item={item} expanded={expanded} />
           {expanded && <Details data={data} item={item} />}
+          {!expanded && <VenueProgressBar result={item.result} />}
         </>
       )}
     </div>
@@ -148,7 +159,11 @@ function Summary({ item, expanded }: { item: Extract<ResultItem, { kind: 'result
           )}
           <span className="truncate">{r.price ?? r.subtitle}</span>
         </div>
-        <div className="truncate text-[11px] text-muted">{r.address ?? r.contact?.name ?? r.meta}</div>
+        {!expanded && venueActivity(r) ? (
+          <VenueProgressLine result={r} />
+        ) : (
+          <div className="truncate text-[11px] text-muted">{r.address ?? r.contact?.name ?? r.meta}</div>
+        )}
       </div>
       {expanded ? (
         <ChevronUp size={16} className="shrink-0 text-muted" />
@@ -183,6 +198,8 @@ function Details({ data, item }: { data: ResultNodeData; item: Extract<ResultIte
           <p className="text-[13px] leading-relaxed text-gray-700">{r.why}</p>
         </div>
       )}
+
+      {venueExtra(r) && <VenueDetails result={r} ctx={data.ctx} />}
 
       {todo.length > 0 && (
         <div>
@@ -240,7 +257,9 @@ function Details({ data, item }: { data: ResultNodeData; item: Extract<ResultIte
         </div>
       )}
 
-      <div className="mt-auto flex items-center gap-2 pt-1">
+      <div className="mt-auto flex flex-col gap-2 pt-1">
+        <ResultActions data={data} result={r} />
+        <div className="flex items-center gap-2">
         <button
           onClick={() => onDecide('approved')}
           className={`flex flex-1 items-center justify-center gap-1.5 rounded-full py-2 text-xs font-semibold transition ${
@@ -271,7 +290,22 @@ function Details({ data, item }: { data: ResultNodeData; item: Extract<ResultIte
             Maps <ExternalLink size={11} />
           </a>
         )}
+        </div>
       </div>
+    </div>
+  )
+}
+
+// Buttons/panels feature modules registered for this option (see lib/resultActions).
+function ResultActions({ data, result }: { data: ResultNodeData; result: TaskResult }) {
+  const { task, event, ctx, onUpdateResult } = data
+  const actions = resultActionsFor(task, result, ctx)
+  if (!actions.length) return null
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {actions.map((a) => (
+        <a.Component key={a.id} task={task} result={result} event={event} ctx={ctx} onUpdate={onUpdateResult} />
+      ))}
     </div>
   )
 }

@@ -31,6 +31,7 @@ REST_ROUTERS = [
     "app.api.live_sessions",
     "app.api.outreach",
     "app.api.search",
+    "app.api.intake",
 ]
 WS_ROUTERS = [
     "app.api.ws_events",

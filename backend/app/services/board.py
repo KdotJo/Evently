@@ -25,7 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.ids import utcnow
 from app.models import Board, Card, Edge
 from app.realtime import events as ev
-from app.schemas.common import CardOut, EdgeOut, dump
+from app.schemas.common import BoardOut, CardOut, EdgeOut, dump
 from app.services import layout
 from app.services.layout import CARD_H, CARD_W, COLUMNS, GAP, Position  # noqa: F401 - grid constants stay importable
 
@@ -70,6 +70,10 @@ def edge_out(edge: Edge) -> dict[str, Any]:
     return dump(EdgeOut, edge)
 
 
+def board_out(board: Board) -> dict[str, Any]:
+    return dump(BoardOut, board)
+
+
 # --- board ---------------------------------------------------------------------
 
 
@@ -95,17 +99,19 @@ async def update_board(
 ) -> Board:
     """Rename the board and/or replace its saved viewport (`{x, y, zoom}`). Omitted fields are kept.
 
-    Nothing is published: the event catalogue has no board-level type.
+    Publishes `board.updated {board}` on the event topic.
     """
     board_id = (await get_or_create_board(ctx, event_id)).id
-    async with ctx.db() as session:
-        board = await session.get(Board, board_id)
-        if name is not None:
-            board.name = name
-        if viewport is not None:
-            board.viewport = viewport
-        await session.commit()
-        return board
+    async with _lock(ctx, event_id):
+        async with ctx.db() as session:
+            board = await session.get(Board, board_id)
+            if name is not None:
+                board.name = name
+            if viewport is not None:
+                board.viewport = viewport
+            await session.commit()
+        await ctx.bus.publish(ev.event_topic(event_id), ev.BOARD_UPDATED, {"board": board_out(board)})
+    return board
 
 
 # --- cards ---------------------------------------------------------------------

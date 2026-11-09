@@ -80,7 +80,7 @@ async def get_email(email_id: str, ctx: Ctx, user: CurrentUser):
 
 @router.patch("/emails/{email_id}", response_model=EmailMessageOut)
 async def patch_email(email_id: str, body: EmailPatch, ctx: Ctx, user: CurrentUser):
-    """Edit a draft; 409 once it has been sent (or is being sent)."""
+    """Edit a draft or a failed email (which becomes a draft again, error cleared); 409 while sending or once sent."""
     await _owned_email(ctx, email_id, user)
     try:
         return await outreach.update_email(ctx, email_id, changes=body.model_dump(exclude_unset=True))
@@ -90,7 +90,7 @@ async def patch_email(email_id: str, body: EmailPatch, ctx: Ctx, user: CurrentUs
 
 @router.delete("/emails/{email_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_email(email_id: str, ctx: Ctx, user: CurrentUser):
-    """Delete a draft (409 for anything already sent)."""
+    """Delete a draft or a failed email; 409 while sending or once sent."""
     await _owned_email(ctx, email_id, user)
     try:
         await outreach.delete_email(ctx, email_id)

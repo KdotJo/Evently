@@ -17,6 +17,17 @@ data:
   WEATHER_PROVIDER: auto
   TRAFFIC_PROVIDER: auto
   STT_PROVIDER: auto
+  # --- LLM ----------------------------------------------------------------------------------
+  # anthropic (needs ANTHROPIC_API_KEY) or openai (needs OPENAI_API_KEY). Overrides route single purposes,
+  # e.g. "orchestrator=openai,presentations=openai" (purposes listed in .env.example). The Secret is
+  # loaded after this ConfigMap, so the dev Secret built from .env overrides these.
+  LLM_PROVIDER: anthropic
+  LLM_PROVIDER_OVERRIDES: ""
+  # On billing/credential failures (e.g. Claude out of credits) retry on the other configured provider.
+  LLM_FALLBACK: auto
+  LLM_FALLBACK_COOLDOWN_S: "600"
+  OPENAI_ORCHESTRATOR_MODEL: gpt-6-astra
+  OPENAI_WORKER_MODEL: gpt-6-astra
   EMAIL_PROVIDER: auto
   # --- observability (OpenTelemetry → Dash0) --------------------------------------------------
   OTEL_ENABLED: "true"

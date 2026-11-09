@@ -84,20 +84,20 @@ inherit the context at creation). Attributes:
 Failures record the exception and set span status `ERROR`; cancellations stay `UNSET` (they are
 normal). The span name is constant on purpose — group by `agent.kind` in Dash0.
 
-### `llm.request` — `app/llm/anthropic_client.py` (`run()` per streamed turn, `parse()` once)
+### `llm.request` — `app/llm/telemetry.py`, used by `anthropic_client.py` and `openai_client.py` (`run()` per streamed turn, `parse()` once)
 
 GenAI semantic-convention names (both the older `gen_ai.system` and the current
 `gen_ai.provider.name` are set):
 
 | Attribute | Value |
 |---|---|
-| `gen_ai.system` / `gen_ai.provider.name` | `anthropic` |
+| `gen_ai.system` / `gen_ai.provider.name` | `anthropic` or `openai` |
 | `gen_ai.operation.name` | `chat` |
 | `gen_ai.request.model`, `gen_ai.request.max_tokens` | requested model / limit |
 | `gen_ai.response.model`, `gen_ai.response.id` | what the API answered with |
-| `gen_ai.response.finish_reasons` | `["end_turn"]`, `["tool_use"]`, `["max_tokens"]`, `["refusal"]`, `["pause_turn"]` |
+| `gen_ai.response.finish_reasons` | `["end_turn"]`, `["tool_use"]`, `["max_tokens"]`, `["refusal"]`, `["pause_turn"]` (OpenAI statuses are normalised to these) |
 | `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` | per response |
-| `gen_ai.usage.cache_read_input_tokens`, `gen_ai.usage.cache_creation_input_tokens` | prompt-cache usage (Anthropic field names) |
+| `gen_ai.usage.cache_read_input_tokens`, `gen_ai.usage.cache_creation_input_tokens` | prompt-cache usage (Anthropic field names; OpenAI `cached_tokens` / `cache_write_tokens` map onto them, and `input_tokens` excludes both) |
 | `evently.llm.purpose`, `evently.llm.tier`, `evently.llm.structured_output` | the agent's `purpose` string, `orchestrator`/`worker`, `parse()` vs `run()` |
 
 API errors are recorded and set status `ERROR`. Prompts and completions are **not** attached
@@ -117,8 +117,8 @@ Attribute sets are low-cardinality by design (no run/session/event ids).
 |---|---|---|---|---|
 | `evently.agent_runs.active` | UpDownCounter | `agent.kind` | `agent_run_started` / `agent_run_finished` | **done** — `app/agents/runtime.py` |
 | `evently.agent_runs.finished` | Counter | `agent.kind`, `agent.status` | `agent_run_finished` | **done** — runtime |
-| `evently.llm.requests` | Counter | `gen_ai.request.model`, `gen_ai.response.finish_reason` | `llm_request` | **done** — `app/llm/anthropic_client.py` |
-| `evently.llm.tokens` | Counter | `gen_ai.request.model`, `gen_ai.token.type` (`input`/`output`/`cache_read`/`cache_creation`) | `llm_tokens(model, usage)` | **done** — anthropic client |
+| `evently.llm.requests` | Counter | `gen_ai.request.model`, `gen_ai.response.finish_reason` | `llm_request` | **done** — `app/llm/telemetry.py` (both providers) |
+| `evently.llm.tokens` | Counter | `gen_ai.request.model`, `gen_ai.token.type` (`input`/`output`/`cache_read`/`cache_creation`) | `llm_tokens(model, usage)` | **done** — `app/llm/telemetry.py` (both providers) |
 | `evently.audio.frames` | Counter | `audio.codec`, `audio.sample_rate` | `audio_frames(codec, sample_rate)` | Package 14: `app/live/audio_hub.py` `AudioSource.publish()` after `self.frames_in += 1` |
 | `evently.audio.frames_dropped` | Counter | – | `audio_frames_dropped(n)` | Package 14: `BoundedAudioQueue.push()` each time `_drop_oldest_audio()` succeeds (or `AudioHub.remove_listener()` with `listener.dropped` if you prefer one call per listener) |
 | `evently.audio.listeners` | UpDownCounter | – | `audio_listener_joined` / `audio_listener_left` | Package 14: `AudioHub.add_listener()` / `remove_listener()` |

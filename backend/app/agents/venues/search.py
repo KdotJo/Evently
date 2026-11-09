@@ -14,6 +14,8 @@ from app.agents.venues.scout import VenueSearchError, make_scout
 from app.llm.base import LLMError
 from app.models import AgentRun, Card, Event
 from app.providers.base import GeoPoint, PlaceCandidate
+from app.realtime import events as ev
+from app.schemas.common import EventOut, dump
 from app.schemas.venue import VenueCriteria, VenueScore
 from app.services import board
 
@@ -31,8 +33,10 @@ async def _save_requirements(ctx: AppContext, event_id: str, criteria: VenueCrit
         event = await session.get(Event, event_id)
         if event is None:
             raise LookupError(f"event {event_id} not found")
-        event.requirements = criteria.model_dump(mode="json")
+        # Merge: keep keys other writers own (e.g. the web app's `intake` / `plan`).
+        event.requirements = {**(event.requirements or {}), **criteria.model_dump(mode="json")}
         await session.commit()
+    await ctx.bus.publish(ev.event_topic(event_id), ev.EVENT_UPDATED, {"event": dump(EventOut, event)})
 
 
 async def _run_scout(run: RunContext, criteria: VenueCriteria) -> tuple[list[PlaceCandidate], GeoPoint | None]:

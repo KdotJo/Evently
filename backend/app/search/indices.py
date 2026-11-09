@@ -38,6 +38,15 @@ _ANALYSIS = {
 INDEX_SETTINGS: dict[str, Any] = {"number_of_shards": 1, "number_of_replicas": 0, **_ANALYSIS}
 
 
+def index_settings(*, serverless: bool) -> dict[str, Any]:
+    """Index settings for this cluster flavour.
+
+    Elastic Cloud Serverless manages sharding itself and rejects `number_of_shards` /
+    `number_of_replicas` with a 400, so only the analysis settings are sent there.
+    """
+    return dict(_ANALYSIS) if serverless else dict(INDEX_SETTINGS)
+
+
 def _text(**extra: Any) -> dict[str, Any]:
     return {"type": "text", "analyzer": "evently_text", **extra}
 

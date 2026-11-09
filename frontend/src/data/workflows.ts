@@ -1,3 +1,4 @@
+import { hasRunner } from '../lib/runners'
 import type { EventType, Integration, Task } from '../types'
 
 type TaskSeed = Omit<Task, 'status' | 'results'>
@@ -97,6 +98,10 @@ export const INTEGRATION_LABEL: Record<Integration, string> = {
 }
 
 export const needsGoogle = (i: Integration) => i !== 'web'
+
+// A step waits on "Connect Google" only while it has no real backend runner: steps served by the
+// backend (venues, decks, outreach) use server-side keys and never need the Google gate.
+export const gatedByGoogle = (task: Pick<Task, 'id' | 'integration'>) => needsGoogle(task.integration) && !hasRunner(task)
 
 // Every agent used across the workflows, with the integration it works through and one example job.
 export const AGENTS: { name: string; integration: Integration; example: string }[] = [

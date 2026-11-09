@@ -1,6 +1,7 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 import { AlertTriangle, Calendar, Check, ChevronRight, Contact, Globe, Loader2, Lock, Mail, MapPin, Presentation, Unlink } from 'lucide-react'
-import { INTEGRATION_LABEL, needsGoogle } from '../data/workflows'
+import { INTEGRATION_LABEL, gatedByGoogle } from '../data/workflows'
+import { venueActivity } from '../features/venues/model'
 import { NODE_H, NODE_W } from '../lib/layout'
 import type { Integration, Task } from '../types'
 
@@ -37,11 +38,13 @@ export default function TaskNode({ data }: NodeProps<TaskNodeType>) {
   type Shown = Task['status'] | 'approved'
   const status: Shown = task.status !== 'done' ? task.status : !approved ? 'idle' : planApproved ? 'done' : 'approved'
   // Waiting steps that need an unlinked service show the disconnect icon instead of the lock.
-  const unlinked = (status === 'blocked' || status === 'queued') && needsGoogle(task.integration) && !googleConnected
+  const unlinked = (status === 'blocked' || status === 'queued') && gatedByGoogle(task) && !googleConnected
   const blockedBy = unlinked ? 'google' : status === 'blocked' ? task.blockedBy : undefined
   // Stuck behind another step reads as waiting, not as an error.
   const look = unlinked ? 'blocked' : status === 'blocked' ? 'queued' : status
   const Icon = ICON[task.integration]
+  // Options whose research agents are still filling them in (venue cards).
+  const researching = task.results?.filter((r) => venueActivity(r) === 'busy').length ?? 0
 
   return (
     <div
@@ -63,7 +66,7 @@ export default function TaskNode({ data }: NodeProps<TaskNodeType>) {
         {INTEGRATION_LABEL[task.integration]}
         {task.results && (
           <span className="ml-auto flex items-center whitespace-nowrap text-accent">
-            {reviewed ? `${reviewed} reviewed` : `${task.results.length} found`}
+            {reviewed ? `${reviewed} reviewed` : researching ? `${task.results.length} found · ${researching} researching` : `${task.results.length} found`}
             <ChevronRight size={12} className={`transition ${selected ? 'rotate-180' : ''}`} />
           </span>
         )}

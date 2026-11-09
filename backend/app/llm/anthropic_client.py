@@ -5,8 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +13,7 @@ import anthropic
 from app.core.config import Settings
 from app.llm.base import (
     AgentResult,
+    LLMBillingError,
     LLMClient,
     LLMError,
     LLMRateLimitError,
@@ -25,10 +24,9 @@ from app.llm.base import (
     Tier,
     Tool,
     ToolCallRecord,
-    UnconfiguredLLM,
     execute_tool,
 )
-from app.observability import metrics, tracing
+from app.llm.telemetry import USAGE_KEYS, empty_usage, llm_span, record_response
 
 log = logging.getLogger(__name__)
 
@@ -36,20 +34,44 @@ log = logging.getLogger(__name__)
 # Anthropic's recommended fallback model inside the same request.
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 _THINKING_TYPES = {"thinking", "redacted_thinking"}
-_USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+PROVIDER = "anthropic"
 
 
-def build_llm(settings: Settings) -> LLMClient:
-    """Return a Claude client, or a placeholder when no credentials can be found."""
-    has_credentials = bool(
+def has_credentials(settings: Settings) -> bool:
+    """True when a Claude API key, auth token or `ant auth login` profile can be found."""
+    return bool(
         settings.anthropic_api_key
         or os.environ.get("ANTHROPIC_AUTH_TOKEN")
         or os.environ.get("ANTHROPIC_PROFILE")
         or (Path.home() / ".config" / "anthropic").exists()
     )
-    if not has_credentials:
-        return UnconfiguredLLM()
-    return AnthropicLLM(settings)
+
+
+_BILLING_WORDS = ("credit balance", "billing", "insufficient")
+_PLAN_WORDS = ("billing", "plan")
+
+
+def _billing_error(exc: Exception) -> LLMBillingError | None:
+    """`LLMBillingError` when Claude refused the request over credits/billing, else None.
+
+    - 402, or an error body typed `billing_error`;
+    - 400 whose message mentions "credit balance", "billing" or "insufficient" (an empty
+      prepaid balance comes back as 400 "Your credit balance is too low to access the Anthropic API");
+    - 403 whose message mentions "billing" or "plan".
+    """
+    if not isinstance(exc, anthropic.APIStatusError):
+        return None
+    status = exc.status_code
+    detail = getattr(exc, "api_message", None) or exc.message
+    text = f"{detail} {exc.message}".lower()
+    if (
+        status == 402
+        or getattr(exc, "type", None) == "billing_error"
+        or (status == 400 and any(w in text for w in _BILLING_WORDS))
+        or (status == 403 and any(w in text for w in _PLAN_WORDS))
+    ):
+        return LLMBillingError(f"Claude is out of credits or blocked by billing (HTTP {status}): {detail}")
+    return None
 
 
 def _block_to_dict(block: Any) -> dict[str, Any]:
@@ -58,45 +80,19 @@ def _block_to_dict(block: Any) -> dict[str, Any]:
     return block.model_dump(mode="json", exclude_none=True)
 
 
-@contextmanager
-def _llm_span(purpose: str, model: str, tier: str, max_tokens: int, *, structured: bool = False) -> Iterator[Any]:
-    """`llm.request` span around one Claude request (GenAI semantic conventions). No-op when OTel is off."""
-    attributes = {
-        "gen_ai.system": "anthropic",
-        "gen_ai.provider.name": "anthropic",
-        "gen_ai.operation.name": "chat",
-        "gen_ai.request.model": model,
-        "gen_ai.request.max_tokens": max_tokens,
-        "evently.llm.purpose": purpose,
-        "evently.llm.tier": tier,
-        "evently.llm.structured_output": structured,
-    }
-    with tracing.start_span("llm.request", attributes) as span:
-        try:
-            yield span
-        except Exception as exc:
-            span.record_exception(exc)
-            span.set_error(f"{type(exc).__name__}: {exc}")
-            raise
+def _usage(response: Any) -> dict[str, int]:
+    return {key: getattr(response.usage, key, 0) or 0 for key in USAGE_KEYS}
 
 
-def _record_response(span: Any, model: str, response: Any) -> None:
-    """Token usage + stop reason onto the span and the `evently.llm.*` metrics."""
-    usage = {key: getattr(response.usage, key, 0) or 0 for key in _USAGE_KEYS}
-    stop_reason = getattr(response, "stop_reason", None)
-    span.set_attributes(
-        {
-            "gen_ai.response.model": getattr(response, "model", None),
-            "gen_ai.response.id": getattr(response, "id", None),
-            "gen_ai.response.finish_reasons": [stop_reason] if stop_reason else None,
-            "gen_ai.usage.input_tokens": usage["input_tokens"],
-            "gen_ai.usage.output_tokens": usage["output_tokens"],
-            "gen_ai.usage.cache_read_input_tokens": usage["cache_read_input_tokens"],
-            "gen_ai.usage.cache_creation_input_tokens": usage["cache_creation_input_tokens"],
-        }
+def _record(span: Any, model: str, response: Any) -> None:
+    record_response(
+        span,
+        model,
+        usage=_usage(response),
+        stop_reason=getattr(response, "stop_reason", None),
+        response_model=getattr(response, "model", None),
+        response_id=getattr(response, "id", None),
     )
-    metrics.llm_request(model, stop_reason)
-    metrics.llm_tokens(model, usage)
 
 
 def _persistable(role: str, content: Any) -> dict[str, Any]:
@@ -150,6 +146,9 @@ class AnthropicLLM(LLMClient):
 
     @staticmethod
     def _translate(exc: Exception) -> LLMError:
+        billing = _billing_error(exc)
+        if billing is not None:
+            return billing
         if isinstance(exc, anthropic.AuthenticationError | anthropic.PermissionDeniedError):
             return LLMUnavailableError(f"Claude rejected the configured credentials: {exc}")
         if isinstance(exc, anthropic.RateLimitError):
@@ -209,15 +208,15 @@ class AnthropicLLM(LLMClient):
             kwargs["tools"] = tool_defs
 
         history: list[dict[str, Any]] = list(messages)
-        result = AgentResult(text="", stop_reason="max_turns", usage=dict.fromkeys(_USAGE_KEYS, 0))
+        result = AgentResult(text="", stop_reason="max_turns", usage=empty_usage())
 
         for _ in range(max_turns):
-            with _llm_span(purpose, model, tier, max_tokens) as span:
+            with llm_span(PROVIDER, purpose, model, tier, max_tokens) as span:
                 response = await self._stream_turn(api, {**kwargs, "messages": history}, callbacks)
-                _record_response(span, model, response)
+                _record(span, model, response)
             result.turns += 1
-            for key in _USAGE_KEYS:
-                result.usage[key] += getattr(response.usage, key, 0) or 0
+            for key, count in _usage(response).items():
+                result.usage[key] += count
 
             if response.stop_reason == "refusal":
                 # Checked before reading content: a refusal can cut a tool call off mid-input.
@@ -276,14 +275,14 @@ class AnthropicLLM(LLMClient):
     ) -> T:
         model, effort = self._resolve(tier, model, effort)
         api, kwargs = self._request(model, effort, system, max_tokens)
-        with _llm_span(purpose, model, tier, max_tokens, structured=True) as span:
+        with llm_span(PROVIDER, purpose, model, tier, max_tokens, structured=True) as span:
             try:
                 # Streamed so long structured answers (slide HTML) cannot hit HTTP timeouts.
                 async with api.stream(**kwargs, messages=messages, output_format=output_model) as stream:
                     response = await stream.get_final_message()
             except anthropic.APIError as exc:
                 raise self._translate(exc) from exc
-            _record_response(span, model, response)
+            _record(span, model, response)
 
         if response.stop_reason == "refusal":
             raise LLMRefusalError(f"Claude declined the request ({purpose}).")

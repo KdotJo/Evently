@@ -28,7 +28,7 @@ from elasticsearch import AsyncElasticsearch
 from elasticsearch.exceptions import ApiError, BadRequestError, TransportError
 from elasticsearch.helpers import async_streaming_bulk
 
-from app.search.indices import INDEX_SETTINGS, VENUE_SEMANTIC_FIELD, IndexNames, all_mappings
+from app.search.indices import VENUE_SEMANTIC_FIELD, IndexNames, all_mappings, index_settings
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -68,6 +68,7 @@ class SearchClient:
         self.semantic = False
         self.inference_id: str | None = None
         self.cluster: dict[str, Any] = {}
+        self.serverless = False
         self.last_error: str | None = None
         self._ready = asyncio.Event()
         self._closed = False
@@ -82,6 +83,7 @@ class SearchClient:
                 "name": info.get("cluster_name"),
                 "version": (info.get("version") or {}).get("number"),
             }
+            self.serverless = (info.get("version") or {}).get("build_flavor") == "serverless"
             self.inference_id = await self._detect_inference()
             await self.ensure_indices()
         except (TransportError, ApiError) as exc:
@@ -192,7 +194,8 @@ class SearchClient:
     async def _create_index(self, name: str, mapping: dict[str, Any]) -> bool:
         """Create `name`; returns False when it was created concurrently or the semantic field was refused."""
         try:
-            await self.es.indices.create(index=name, mappings=mapping, settings=INDEX_SETTINGS)
+            settings = index_settings(serverless=self.serverless)
+            await self.es.indices.create(index=name, mappings=mapping, settings=settings)
             log.info("search: created index %s", name)
             return True
         except BadRequestError as exc:
@@ -206,7 +209,8 @@ class SearchClient:
                 )
                 self.inference_id = None
                 plain = all_mappings(self.names, inference_id=None)[name]
-                await self.es.indices.create(index=name, mappings=plain, settings=INDEX_SETTINGS)
+                settings = index_settings(serverless=self.serverless)
+                await self.es.indices.create(index=name, mappings=plain, settings=settings)
                 return False
             raise
 

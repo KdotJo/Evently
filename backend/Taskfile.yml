@@ -29,13 +29,20 @@ vars:
   NAMESPACE: evently
   CLUSTER: evently
   OVERLAY: dev                 # deploy/k8s/overlays/<OVERLAY>: dev | prod
-  IMAGE: evently-api:dev       # local image (docker:build, kind load); also what the dev overlay runs
+  # Local image (docker:build, kind load); also what the dev overlay runs. Podman names a bare tag
+  # `localhost/<name>`, so the fully-qualified name is used there to match what ends up in kind.
+  IMAGE: '{{if eq .ENGINE "podman"}}localhost/{{end}}evently-api:dev'
+  # Podman defaults to OCI image format, which drops HEALTHCHECK; `--format docker` keeps it.
+  BUILD_FLAGS: '{{if eq .ENGINE "podman"}}--format docker{{end}}'
   # IMAGE_TAG / IMAGE_REPO are only used for prod and are deliberately NOT defaulted:
   #   task k8s:deploy:prod IMAGE_REPO=ghcr.io/<org>/evently-api IMAGE_TAG=sha-<commit> KUBE_CONTEXT=<ctx>
   # --- local server -------------------------------------------------------------------------
   PORT: 8000
   BASE_URL: http://localhost:8000
   VENV: .venv
+  # --- frontend (Vite + React, ../frontend) --------------------------------------------------
+  FRONTEND: '{{.ROOT_DIR}}/../frontend'
+  FE_PORT: 5173
   # --- kubernetes ---------------------------------------------------------------------------
   K8S_DIR: deploy/k8s
   KUBE_CONTEXT: kind-{{.CLUSTER}}
@@ -43,7 +50,7 @@ vars:
   KN: kubectl --context {{.KUBE_CONTEXT}} --namespace {{.NAMESPACE}}
   INGRESS_NGINX_VERSION: controller-v1.15.1
   # --- Dash0 operator (values from docs/DEPLOYMENT.md 4.7). DASH0_AUTH_TOKEN, DASH0_ENDPOINT and
-  #     DASH0_API_ENDPOINT are read from .env / the environment (endpoint defaults: eu-west-1.aws) ---
+  #     DASH0_API_ENDPOINT are read from .env / the environment (endpoint defaults: us-west-2.aws, the org's region) ---
   DASH0_NAMESPACE: dash0-system
   DASH0_CLUSTER_NAME: evently-dev
 
@@ -197,6 +204,47 @@ tasks:
         echo "empty = not configured (the app treats empty values as unset)."
 
   # =============================================================================================
+  # Frontend (../frontend: Vite dev server on :5173, proxies /api and /ws to the API on :8000)
+  # =============================================================================================
+
+  fe:install:
+    desc: Install the frontend's npm dependencies
+    dir: '{{.FRONTEND}}'
+    cmds:
+      - npm install
+
+  fe:dev:
+    desc: Run the Vite dev server on http://localhost:5173 (proxies /api and /ws to :8000)
+    dir: '{{.FRONTEND}}'
+    preconditions:
+      - sh: test -d {{.FRONTEND}}/node_modules
+        msg: "Frontend dependencies missing. Run: task fe:install"
+    cmds:
+      - npx vite --port {{.FE_PORT}} --strictPort
+
+  fe:build:
+    desc: Type-check and build the frontend into ../frontend/dist
+    dir: '{{.FRONTEND}}'
+    preconditions:
+      - sh: test -d {{.FRONTEND}}/node_modules
+        msg: "Frontend dependencies missing. Run: task fe:install"
+    cmds:
+      - npm run build
+
+  fe:types:
+    desc: Regenerate frontend/src/api/schema.d.ts from the API's OpenAPI document (no server needed)
+    dir: '{{.FRONTEND}}'
+    preconditions:
+      - sh: test -x {{.ROOT_DIR}}/{{.VENV}}/bin/python
+        msg: "No virtualenv yet. Run: task setup"
+    cmds:
+      - PYTHON={{.ROOT_DIR}}/{{.VENV}}/bin/python npm run api:types
+
+  dev:all:
+    desc: Run the API (:8000, auto-reload) and the frontend (:5173) together; Ctrl-C stops both
+    deps: [dev, fe:dev]
+
+  # =============================================================================================
   # Docker Compose stack: api + postgres + redis + elasticsearch + otel-collector
   # =============================================================================================
 
@@ -259,7 +307,7 @@ tasks:
     desc: Build the API image (IMAGE, default evently-api:dev)
     preconditions: *docker_ready
     cmds:
-      - '{{.ENGINE}} build --tag {{.IMAGE}} .'
+      - '{{.ENGINE}} build {{.BUILD_FLAGS}} --tag {{.IMAGE}} .'
 
   docker:run:
     desc: Run the API image on http://localhost:8000 with .env (SQLite in a named volume)
@@ -302,7 +350,7 @@ tasks:
       - sh: command -v kubectl >/dev/null 2>&1
         msg: "kubectl not found. Run: brew install kubectl"
       - sh: command -v {{.ENGINE}} >/dev/null 2>&1 && {{.ENGINE}} info >/dev/null 2>&1
-        msg: "Docker is not installed or its daemon is not running. Start Docker Desktop / OrbStack."
+        msg: "{{.ENGINE}} is not installed or not running. Podman: `podman machine start` (or task tools:install); Docker: start Docker Desktop."
     cmds:
       - |
         if kind get clusters 2>/dev/null | grep -qx "{{.CLUSTER}}"; then
@@ -337,7 +385,71 @@ tasks:
         done
         {{.KUBECTL}} --namespace ingress-nginx wait --for=condition=ready pod \
           --selector=app.kubernetes.io/component=controller --timeout=180s
+      - task: k8s:dns:upstream
+      - task: k8s:dns:fix
       - echo "kind cluster '{{.CLUSTER}}' is ready (context {{.KUBE_CONTEXT}}), ingress-nginx is running."
+
+  k8s:dns:upstream:
+    desc: Point CoreDNS at public resolvers when the kind node's own upstream list contains a dead one
+    # On Podman the kind node's resolv.conf lists an IPv6 ULA nameserver first that never answers, so every pod
+    # lookup of an external name waits ~5 s for it to time out (LLM calls and OTLP exports then time out).
+    # Overridable: task k8s:dns:upstream UPSTREAMS="9.9.9.9 1.1.1.1"
+    vars:
+      UPSTREAMS: '{{.UPSTREAMS | default "1.1.1.1 8.8.8.8"}}'
+    preconditions:
+      - sh: kubectl config get-contexts -o name | grep -qx "{{.KUBE_CONTEXT}}"
+        msg: "kubectl context '{{.KUBE_CONTEXT}}' not found. Run: task k8s:cluster:up"
+    cmds:
+      - |
+        set -e
+        f="$(mktemp)"
+        {{.KUBECTL}} --namespace kube-system get configmap coredns -o jsonpath='{.data.Corefile}' \
+          | sed 's#forward \. /etc/resolv.conf#forward . {{.UPSTREAMS}}#' > "$f"
+        {{.KUBECTL}} --namespace kube-system create configmap coredns --from-file=Corefile="$f" --dry-run=client -o yaml \
+          | {{.KUBECTL}} replace -f -
+        rm -f "$f"
+        {{.KUBECTL}} --namespace kube-system rollout restart deployment/coredns
+        {{.KUBECTL}} --namespace kube-system rollout status deployment/coredns --timeout=120s
+
+  k8s:dns:fix:
+    desc: Stop wildcard DNS search domains inherited from the host network hijacking external names in pods
+    # Pods use ndots:5 and inherit the host's search list, so api.anthropic.com is first tried as
+    # api.anthropic.com.<search-domain>. If that domain has a wildcard record, every external name resolves to
+    # the wildcard's IP (seen as connect timeouts / TLS failures). CoreDNS answers NXDOMAIN for such domains, so
+    # the lookup falls through to the real name. Re-run after joining a network with other search domains.
+    preconditions:
+      - sh: kubectl config get-contexts -o name | grep -qx "{{.KUBE_CONTEXT}}"
+        msg: "kubectl context '{{.KUBE_CONTEXT}}' not found. Run: task k8s:cluster:up"
+      - sh: '{{.ENGINE}} exec {{.CLUSTER}}-control-plane true'
+        msg: "kind node {{.CLUSTER}}-control-plane is not reachable through {{.ENGINE}}."
+    cmds:
+      - |
+        set -e
+        node="{{.CLUSTER}}-control-plane"
+        zones=""
+        for d in $({{.ENGINE}} exec "$node" awk '/^search/ { $1 = ""; print }' /etc/resolv.conf); do
+          if {{.ENGINE}} exec "$node" getent hosts "evently-wildcard-probe-$(date +%s).$d." >/dev/null 2>&1; then
+            zones="$zones $d"
+          fi
+        done
+        f="$(mktemp)"
+        {{.KUBECTL}} --namespace kube-system get configmap coredns -o jsonpath='{.data.Corefile}' \
+          | awk '/^# BEGIN evently-wildcard-dns$/ { skip = 1; next } /^# END evently-wildcard-dns$/ { skip = 0; next } !skip' > "$f"
+        if [ -n "$zones" ]; then
+          {
+            echo "# BEGIN evently-wildcard-dns"
+            for z in $zones; do
+              printf '%s:53 {\n    template ANY ANY {\n        rcode NXDOMAIN\n    }\n}\n' "$z"
+            done
+            echo "# END evently-wildcard-dns"
+          } >> "$f"
+        fi
+        {{.KUBECTL}} --namespace kube-system create configmap coredns --from-file=Corefile="$f" --dry-run=client -o yaml \
+          | {{.KUBECTL}} replace -f -
+        rm -f "$f"
+        {{.KUBECTL}} --namespace kube-system rollout restart deployment/coredns
+        {{.KUBECTL}} --namespace kube-system rollout status deployment/coredns --timeout=120s
+        echo "Wildcard search domains blocked in CoreDNS:${zones:- none}"
 
   k8s:cluster:down:
     desc: Delete the kind cluster "evently" (everything inside it is lost)
@@ -356,8 +468,17 @@ tasks:
       - sh: kind get clusters 2>/dev/null | grep -qx "{{.CLUSTER}}"
         msg: "kind cluster '{{.CLUSTER}}' not found. Run: task k8s:cluster:up"
     cmds:
-      - '{{.ENGINE}} build --tag {{.IMAGE}} .'
-      - kind load docker-image {{.IMAGE}} --name {{.CLUSTER}}
+      - '{{.ENGINE}} build {{.BUILD_FLAGS}} --tag {{.IMAGE}} .'
+      - |
+        # `kind load docker-image` only works against a Docker daemon; with Podman kind cannot see the
+        # image ("not present locally"), so hand it a tarball instead. Works for both engines.
+        set -e
+        archive="$(mktemp -t evently-image.XXXXXX).tar"
+        {{.ENGINE}} save --format docker-archive --output "$archive" {{.IMAGE}} 2>/dev/null \
+          || {{.ENGINE}} save --output "$archive" {{.IMAGE}}
+        kind load image-archive "$archive" --name {{.CLUSTER}}
+        rm -f "$archive"
+        echo "Loaded {{.IMAGE}} into kind cluster '{{.CLUSTER}}'."
 
   k8s:render:
     desc: Print the manifests for OVERLAY (dev|prod) as deployed; SCALE_OUT=true adds the scale-out component
@@ -428,7 +549,7 @@ tasks:
     desc: Create/replace the dev Secret evently-api-secrets from .env (keys only the API needs)
     # The Secret name comes from deploy/k8s/base/secret.yaml. DATABASE_URL and SECRET_KEY are NOT taken from
     # .env (its DATABASE_URL points at a local SQLite file); they are read from the rendered dev overlay so
-    # they match the in-cluster Postgres. ELASTICSEARCH_URL stays in the ConfigMap (dev overlay).
+    # they match the in-cluster Postgres. ELASTICSEARCH_URL/KEY (Elastic Cloud) and OTEL_EXPORTER_OTLP_HEADERS come from .env.
     # DASH0_AUTH_TOKEN, when set in .env or the environment, becomes OTEL_EXPORTER_OTLP_HEADERS.
     preconditions:
       - sh: command -v kubectl >/dev/null 2>&1
@@ -440,18 +561,19 @@ tasks:
     cmds:
       - |
         set -e
-        umask 077
         f="$(mktemp)"
         rc=0
         {
           kubectl kustomize {{.K8S_DIR}}/overlays/dev \
             | sed -n -E 's/^  (DATABASE_URL|SECRET_KEY): "?([^"]*)"?$/\1=\2/p'
           tr -d '\r' < .env \
-            | grep -E '^(ANTHROPIC_API_KEY|GOOGLE_MAPS_API_KEY|GOOGLE_API_KEY|DEEPGRAM_API_KEY|ASSEMBLYAI_API_KEY|OPENAI_API_KEY|STT_PROVIDER|LIVEKIT_URL|LIVEKIT_API_KEY|LIVEKIT_API_SECRET|EMAIL_PROVIDER|EMAIL_FROM|RESEND_API_KEY|SMTP_HOST|SMTP_PORT|SMTP_USERNAME|SMTP_PASSWORD|LUMA_API_KEY|ELASTICSEARCH_API_KEY)=.+' \
+            | grep -E '^(ANTHROPIC_API_KEY|LLM_PROVIDER|LLM_PROVIDER_OVERRIDES|OPENAI_ORCHESTRATOR_MODEL|OPENAI_WORKER_MODEL|GOOGLE_MAPS_API_KEY|GOOGLE_API_KEY|DEEPGRAM_API_KEY|ASSEMBLYAI_API_KEY|OPENAI_API_KEY|STT_PROVIDER|LIVEKIT_URL|LIVEKIT_API_KEY|LIVEKIT_API_SECRET|EMAIL_PROVIDER|EMAIL_FROM|RESEND_API_KEY|SMTP_HOST|SMTP_PORT|SMTP_USERNAME|SMTP_PASSWORD|LUMA_API_KEY|ELASTICSEARCH_URL|ELASTICSEARCH_API_KEY|OTEL_EXPORTER_OTLP_HEADERS)=.+' \
             | sed -E -e 's/^([A-Z0-9_]+)="(.*)"$/\1=\2/' -e "s/^([A-Z0-9_]+)='(.*)'\$/\1=\2/" || true
           if [ -n "$DASH0_AUTH_TOKEN" ]; then echo "OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer $DASH0_AUTH_TOKEN"; fi
         } > "$f"
-        grep -q '^ANTHROPIC_API_KEY=.' "$f" || echo "WARNING: ANTHROPIC_API_KEY is empty in .env; chat, venue research and decks will not work."
+        llm="$(sed -n 's/^LLM_PROVIDER=//p' "$f" | tail -n 1)"
+        if [ "$llm" = openai ]; then llm_key=OPENAI_API_KEY; else llm_key=ANTHROPIC_API_KEY; fi
+        grep -q "^$llm_key=." "$f" || echo "WARNING: $llm_key is empty in .env (LLM_PROVIDER=${llm:-anthropic}); chat, venue research and decks will not work."
         grep -q '^DATABASE_URL=postgresql' "$f" || { rm -f "$f"; echo "Could not read DATABASE_URL from the dev overlay"; exit 1; }
         {{.KUBECTL}} create namespace {{.NAMESPACE}} --dry-run=client -o yaml | {{.KUBECTL}} apply -f - || rc=$?
         if [ "$rc" = 0 ]; then
@@ -609,8 +731,8 @@ tasks:
         helm upgrade --install --wait --kube-context {{.KUBE_CONTEXT}} --namespace {{.DASH0_NAMESPACE}}
         dash0-operator dash0-operator/dash0-operator
         --set operator.dash0Export.enabled=true
-        --set operator.dash0Export.endpoint="${DASH0_ENDPOINT:-ingress.eu-west-1.aws.dash0.com:4317}"
-        --set operator.dash0Export.apiEndpoint="${DASH0_API_ENDPOINT:-https://api.eu-west-1.aws.dash0.com}"
+        --set operator.dash0Export.endpoint="${DASH0_ENDPOINT:-ingress.us-west-2.aws.dash0.com:4317}"
+        --set operator.dash0Export.apiEndpoint="${DASH0_API_ENDPOINT:-https://api.us-west-2.aws.dash0.com}"
         --set operator.dash0Export.secretRef.name=dash0-authorization-secret
         --set operator.dash0Export.secretRef.key=token
         --set operator.clusterName={{.DASH0_CLUSTER_NAME}}

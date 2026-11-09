@@ -45,6 +45,10 @@ cp .env.example .env
 API; `task k8s:up` creates a local kind cluster and deploys the dev overlay. Containers run on
 **Podman** by default (`ENGINE=docker` switches to Docker). `task --list` shows everything.
 
+Frontend (from `backend/`): `task fe:install` once, then `task dev:all` runs the API on :8000 and the
+Vite app on http://localhost:5173 (it proxies `/api` and `/ws` to the API; no sign-in needed in dev).
+`task fe:types` regenerates `frontend/src/api/schema.d.ts` from the API schema after backend changes.
+
 ## What is where
 
 | Area | Code | Docs |
@@ -63,9 +67,20 @@ cleanly when a key is missing: chat, venue research and deck generation return `
 transcription falls back to the browser's Web Speech API without an STT key; email, Luma, search
 and telemetry are off until configured.
 
+The LLM is Claude by default. `LLM_PROVIDER=openai` (with `OPENAI_API_KEY`) moves every LLM call
+to OpenAI; `LLM_PROVIDER_OVERRIDES` moves single features, e.g.
+`LLM_PROVIDER_OVERRIDES=orchestrator=openai,presentations=openai` runs chat orchestration and deck
+generation on OpenAI and leaves venue research on Claude. `.env.example` lists every purpose, and
+`GET /api/v1/health` shows the resulting routing.
+
 ## Realtime protocol
 
 Every state change is published as an envelope `{id, type, topic, seq, ts, data, trace_id}` and
 forwarded unchanged over `WS /ws/events/{event_id}` (planner workspace), `GET /api/v1/events/{id}/stream`
 (same, as SSE), `WS /ws/sessions/{session_id}` (live session) and binary audio over
 `WS /ws/sessions/{session_id}/audio`. Event types are listed in `backend/app/realtime/events.py`.
+Live-session lifecycle, slide and presence envelopes (`session.updated`, `session.slide.changed`,
+`session.participant.joined/left`) are also published on the owning event's topic, so the planner
+workspace sees them without joining the session; transcript and audio stay on the session topic.
+The first-paint `GET /api/v1/events/{id}/snapshot` takes `?include=slides,chat,emails,luma`, and deck
+render URLs accept `?token=` for iframes. `backend/docs/IMPLEMENTATION_PLAN.md` §4 has the details.

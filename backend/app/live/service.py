@@ -4,7 +4,10 @@ Owns live-session state: lifecycle, participants, the current slide and the
 transcript. The audio/STT pipeline and the WebSocket routes call these
 functions; they never touch the tables directly.
 
-All state changes publish envelopes on `session:{session_id}`.
+All state changes publish envelopes on `session:{session_id}`. Lifecycle, slide
+and presence envelopes (`ev.MIRRORED_SESSION_TYPES`) are also published, with the
+same data, on the owning event's `event:{event_id}` topic so planner UIs see them;
+transcript, audio and STT envelopes stay on the session topic only.
 
 Runtime state: each session that is not ended has an in-memory `_Runtime`
 (in `ctx.service("live_sessions")`) holding its latest row, the deck's cues,
@@ -215,8 +218,18 @@ def _topic(session_id: str) -> str:
     return ev.session_topic(session_id)
 
 
+async def _publish(ctx: AppContext, session_id: str, event_id: str | None, type_: str, data: dict[str, Any]) -> None:
+    """Publish on the session topic and, for `ev.MIRRORED_SESSION_TYPES`, on the event topic too.
+
+    Each topic numbers its own copy (`seq` stays per topic); `data` is identical.
+    """
+    await ctx.bus.publish(_topic(session_id), type_, data)
+    if event_id is not None and type_ in ev.MIRRORED_SESSION_TYPES:
+        await ctx.bus.publish(ev.event_topic(event_id), type_, data)
+
+
 async def _publish_session(ctx: AppContext, session: LiveSession) -> None:
-    await ctx.bus.publish(_topic(session.id), ev.SESSION_UPDATED, {"session": dump(LiveSessionOut, session)})
+    await _publish(ctx, session.id, session.event_id, ev.SESSION_UPDATED, {"session": dump(LiveSessionOut, session)})
 
 
 # --- lookups -------------------------------------------------------------------
@@ -382,6 +395,8 @@ async def create_session(
 ) -> Admission:
     """Create a scheduled session with a unique join code and its host participant.
 
+    Publishes `session.updated` on the event topic only (see the comment below).
+
     The title defaults to the deck's title, then the event's name.
     Raises `DeckNotFound` if the presentation is not part of the event.
     """
@@ -408,6 +423,9 @@ async def create_session(
         participant = Participant(session_id=session.id, user_id=host.id, display_name=host.name or "Host", role="host")
         db.add(participant)
         await db.commit()
+    # Only the event topic hears about creation: nobody can be on the session topic yet, and its
+    # first envelope stays the `session.updated` of `start_session`.
+    await ctx.bus.publish(ev.event_topic(event.id), ev.SESSION_UPDATED, {"session": dump(LiveSessionOut, session)})
     return _admit(ctx, session, participant)
 
 
@@ -563,10 +581,19 @@ async def set_slide(
             runtime.tracker.set_current(target)
         if target != previous:
             metrics.slide_changed(_SLIDE_TRIGGERS.get(reason, reason))
-            await ctx.bus.publish(
-                _topic(session_id),
+            await _publish(
+                ctx,
+                session_id,
+                row.event_id,
                 ev.SESSION_SLIDE_CHANGED,
-                {"index": target, "previous_index": previous, "reason": reason, "matched": matched, "by": by},
+                {
+                    "session_id": session_id,
+                    "index": target,
+                    "previous_index": previous,
+                    "reason": reason,
+                    "matched": matched,
+                    "by": by,
+                },
             )
     return row
 
@@ -653,9 +680,11 @@ async def set_participant_connected(ctx: AppContext, participant_id: str, connec
             participant.connected = connected
             participant.left_at = None if connected else utcnow()
             await db.commit()
-        topic = _topic(participant.session_id)
+            event_id = await db.scalar(select(LiveSession.event_id).where(LiveSession.id == participant.session_id))
+        session_id = participant.session_id
         if connected:
             payload = {"participant": dump(ParticipantOut, participant)}
-            await ctx.bus.publish(topic, ev.SESSION_PARTICIPANT_JOINED, payload)
+            await _publish(ctx, session_id, event_id, ev.SESSION_PARTICIPANT_JOINED, payload)
         else:
-            await ctx.bus.publish(topic, ev.SESSION_PARTICIPANT_LEFT, {"participant_id": participant_id})
+            payload = {"session_id": session_id, "participant_id": participant_id}
+            await _publish(ctx, session_id, event_id, ev.SESSION_PARTICIPANT_LEFT, payload)

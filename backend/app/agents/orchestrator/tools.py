@@ -18,6 +18,8 @@ from app.agents.orchestrator import followup
 from app.integrations import outreach
 from app.llm.base import Tool, ToolError
 from app.models import Card, EmailMessage, Event, LumaEvent, Presentation, Slide
+from app.realtime import events as ev
+from app.schemas.common import EventOut, dump
 from app.schemas.outreach import EmailDraftIn, LumaEventDraft
 from app.schemas.presentation import PresentationBrief
 from app.schemas.venue import VenueCriteria
@@ -382,6 +384,7 @@ class Toolbox:
                 raise ToolError("This event no longer exists.")
             event.requirements = requirements
             await session.commit()
+        await self.ctx.bus.publish(ev.event_topic(event.id), ev.EVENT_UPDATED, {"event": dump(EventOut, event)})
 
     def _launched(self, run_id: str, *, follow_up: bool) -> None:
         self.launched_run_ids.append(run_id)

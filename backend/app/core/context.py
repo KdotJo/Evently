@@ -96,7 +96,7 @@ async def build_context(
     settings: Settings, *, llm: LLMClient | None = None, bus: EventBus | None = None
 ) -> AppContext:
     from app.agents.runtime import AgentRuntime
-    from app.llm.anthropic_client import build_llm
+    from app.llm.factory import build_llm
 
     engine = create_engine(settings.database_url)
     await create_tables(engine)

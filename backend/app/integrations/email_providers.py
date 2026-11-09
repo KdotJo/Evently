@@ -218,6 +218,22 @@ class ConsoleProvider:
 # --- selection -------------------------------------------------------------------
 
 
+def resolve_email_provider_name(settings: Settings) -> str:
+    """The provider `build_email_provider` would pick, without building it (cheap; for /health).
+
+    An explicit `EMAIL_PROVIDER` is returned as is. "auto" resolves to "resend" when
+    `RESEND_API_KEY` is set, else "smtp" when `SMTP_HOST` is set, else "console" — or
+    "none" in production, where Console is never chosen automatically.
+    """
+    if settings.email_provider != "auto":
+        return settings.email_provider
+    if settings.resend_api_key:
+        return "resend"
+    if settings.smtp_host:
+        return "smtp"
+    return "none" if settings.environment == "production" else "console"
+
+
 def build_email_provider(settings: Settings) -> EmailProvider:
     """Provider for `settings.email_provider`.
 
@@ -225,16 +241,9 @@ def build_email_provider(settings: Settings) -> EmailProvider:
     (Console is never chosen automatically in production). A real provider without `EMAIL_FROM`,
     or an explicit choice missing its credentials, raises `OutreachError` naming the variable.
     """
-    choice = settings.email_provider
-    if choice == "auto":
-        if settings.resend_api_key:
-            choice = "resend"
-        elif settings.smtp_host:
-            choice = "smtp"
-        elif settings.environment == "production":
-            raise OutreachError("No email provider configured: set RESEND_API_KEY or SMTP_HOST (and EMAIL_FROM)")
-        else:
-            choice = "console"
+    choice = resolve_email_provider_name(settings)
+    if choice == "none":
+        raise OutreachError("No email provider configured: set RESEND_API_KEY or SMTP_HOST (and EMAIL_FROM)")
 
     if choice == "console":
         return ConsoleProvider()

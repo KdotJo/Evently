@@ -450,9 +450,10 @@ def test_render_accepts_a_participant_token_of_the_session_presenting_this_deck(
     detail_url = f"{API}/presentations/{presentation.id}"
     assert strict_client.get(detail_url, params={"token": token(live.id)}).status_code == 401
     assert strict_client.get(f"{detail_url}/export", params={"token": token(live.id)}).status_code == 401
-    # An access token is not a participant token, but the owner's bearer token works as usual.
+    # The owner's access token works as a bearer header or as `?token=` (iframes cannot set headers).
     owner = strict_client.portal.call(get_dev_user, ctx)
     access = create_access_token(settings, owner.id)
-    assert strict_client.get(deck_url, params={"token": access}).status_code == 401
+    assert strict_client.get(deck_url, params={"token": access}).status_code == 200
+    assert strict_client.get(slide_url, params={"token": access}).status_code == 200
     assert strict_client.get(deck_url, headers={"Authorization": f"Bearer {access}"}).status_code == 200
     assert strict_client.get(slide_url, headers={"Authorization": f"Bearer {access}"}).status_code == 200

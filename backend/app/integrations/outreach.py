@@ -159,12 +159,18 @@ async def draft_email(ctx: AppContext, *, event_id: str, draft: EmailDraftIn, cr
     return row
 
 
-async def update_email(ctx: AppContext, email_id: str, *, changes: dict) -> EmailMessage:
-    """Edit a draft's recipients/subject/body (only while status is "draft"); publishes `email.updated`.
+#: Emails in these states may still be edited or deleted; "sending" and "sent" are protected.
+EDITABLE_EMAIL_STATUSES = ("draft", "failed")
 
-    `changes` holds `EmailDraftIn` keys; the merged result is validated as a whole, so a bad
-    address or an empty subject raises `pydantic.ValidationError`. Raises `LookupError` for an
-    unknown id and `OutreachStateError` once the message left the draft state.
+
+async def update_email(ctx: AppContext, email_id: str, *, changes: dict) -> EmailMessage:
+    """Edit a draft's recipients/subject/body; publishes `email.updated`.
+
+    Allowed while the status is "draft" or "failed"; editing a failed email (e.g. fixing a bad
+    recipient) turns it back into a draft and clears its error. `changes` holds `EmailDraftIn`
+    keys; the merged result is validated as a whole, so a bad address or an empty subject raises
+    `pydantic.ValidationError`. Raises `LookupError` for an unknown id and `OutreachStateError`
+    while the message is sending or once it has been sent.
     """
     unknown = set(changes) - set(EmailDraftIn.model_fields)
     if unknown:
@@ -173,30 +179,33 @@ async def update_email(ctx: AppContext, email_id: str, *, changes: dict) -> Emai
         row = await session.get(EmailMessage, email_id)
         if row is None:
             raise LookupError(f"email {email_id} not found")
-        if row.status != "draft":
-            raise OutreachStateError(f"email {email_id} is {row.status}; only drafts can be edited")
+        if row.status not in EDITABLE_EMAIL_STATUSES:
+            raise OutreachStateError(f"email {email_id} is {row.status}; only drafts and failed emails can be edited")
         current = {name: getattr(row, name) for name in EmailDraftIn.model_fields}
         merged = EmailDraftIn.model_validate({**current, **changes})
         for name in EmailDraftIn.model_fields:
             value = getattr(merged, name)
             setattr(row, name, list(value) if isinstance(value, list) else value)
+        if row.status == "failed":
+            row.status = "draft"
+            row.error = None
         await session.commit()
     await _publish_email(ctx, row)
     return row
 
 
 async def delete_email(ctx: AppContext, email_id: str) -> None:
-    """Delete a draft and its board card; publishes `email.deleted`.
+    """Delete a draft or a failed email, and its board card; publishes `email.deleted`.
 
-    Raises `LookupError` for an unknown id and `OutreachStateError` for anything that is not a draft
-    (sent and failed messages are kept as a record of what went out).
+    Raises `LookupError` for an unknown id and `OutreachStateError` while the message is sending
+    or once it has been sent (sent messages are kept as a record of what went out).
     """
     async with ctx.db() as session:
         row = await session.get(EmailMessage, email_id)
         if row is None:
             raise LookupError(f"email {email_id} not found")
-        if row.status != "draft":
-            raise OutreachStateError(f"email {email_id} is {row.status}; only drafts can be deleted")
+        if row.status not in EDITABLE_EMAIL_STATUSES:
+            raise OutreachStateError(f"email {email_id} is {row.status}; only drafts and failed emails can be deleted")
         await session.delete(row)
         await session.commit()
     if row.card_id:

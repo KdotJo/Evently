@@ -336,6 +336,7 @@ async def test_tracker_is_built_from_deck_and_settings_and_its_decisions_move_th
     assert (await service.get_session(ctx, sid)).current_slide_index == 1
     changes = session_published(ctx, sid, ev.SESSION_SLIDE_CHANGED)
     assert len(changes) == 1 and changes[0].data == {
+        "session_id": sid,
         "index": 1,
         "previous_index": 0,
         "reason": "command",
@@ -366,8 +367,8 @@ async def test_manual_slide_changes_clamp_publish_and_sync_the_tracker(ctx, live
 
     changes = [e.data for e in session_published(ctx, sid, ev.SESSION_SLIDE_CHANGED)]
     assert changes == [
-        {"index": 2, "previous_index": 0, "reason": "manual", "matched": None, "by": "prt_host"},
-        {"index": 0, "previous_index": 2, "reason": "manual", "matched": None, "by": None},
+        {"session_id": sid, "index": 2, "previous_index": 0, "reason": "manual", "matched": None, "by": "prt_host"},
+        {"session_id": sid, "index": 0, "previous_index": 2, "reason": "manual", "matched": None, "by": None},
     ]
     assert tracker.synced == [2, 0]
 
@@ -525,7 +526,7 @@ async def test_participant_connections_are_counted_per_socket(ctx, event, host):
 
     await service.set_participant_connected(ctx, pid, False)
     left = session_published(ctx, sid, ev.SESSION_PARTICIPANT_LEFT)
-    assert len(left) == 1 and left[0].data == {"participant_id": pid}
+    assert len(left) == 1 and left[0].data == {"session_id": sid, "participant_id": pid}
     async with ctx.db() as db:
         row = await db.get(Participant, pid)
     assert row.connected is False and row.left_at is not None

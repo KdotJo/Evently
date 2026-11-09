@@ -6,7 +6,7 @@ Call sites (other packages own these files; the hooks are listed in docs/OBSERVA
 
     metrics.agent_run_started(kind)              # AgentRuntime, when a run starts
     metrics.agent_run_finished(kind, status)     # AgentRuntime, on any terminal status
-    metrics.llm_tokens(model, usage)             # AnthropicLLM, per Claude response
+    metrics.llm_tokens(model, usage)             # app/llm/telemetry.py, per LLM response (any provider)
     metrics.audio_frames(codec, sample_rate)     # AudioSource.publish()
     metrics.audio_frames_dropped(n)              # BoundedAudioQueue overflow / listener leaves
     metrics.stt_latency(provider, seconds, final)   # STT pipeline, per transcript segment
@@ -36,7 +36,7 @@ from typing import Any
 
 METER_NAME = "evently"
 
-# Token usage keys as reported by the Anthropic SDK → `gen_ai.token.type` values.
+# Usage keys (Anthropic names; other providers map onto them) → `gen_ai.token.type` values.
 _TOKEN_TYPES = {
     "input_tokens": "input",
     "output_tokens": "output",
@@ -56,10 +56,10 @@ class _Instruments:
             "evently.agent_runs.finished", unit="{run}", description="Agent runs that reached a terminal status"
         )
         self.llm_requests = meter.create_counter(
-            "evently.llm.requests", unit="{request}", description="Claude requests (one per streamed turn)"
+            "evently.llm.requests", unit="{request}", description="LLM requests (one per streamed turn), any provider"
         )
         self.llm_tokens = meter.create_counter(
-            "evently.llm.tokens", unit="{token}", description="Claude tokens by model and token type"
+            "evently.llm.tokens", unit="{token}", description="LLM tokens by model and token type"
         )
         self.audio_frames = meter.create_counter(
             "evently.audio.frames", unit="{frame}", description="Speaker audio frames accepted by the audio hub"
@@ -139,7 +139,7 @@ def llm_request(model: str, stop_reason: str | None) -> None:
 
 
 def llm_tokens(model: str, usage: Mapping[str, int | None] | None) -> None:
-    """Record one response's usage dict (Anthropic field names) as `evently.llm.tokens`."""
+    """Record one response's usage dict (Anthropic field names, any provider) as `evently.llm.tokens`."""
     if _instruments is None or not usage:
         return
     for key, token_type in _TOKEN_TYPES.items():

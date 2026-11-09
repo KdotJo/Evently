@@ -5,6 +5,10 @@ Every state change the frontend cares about is published on the EventBus as an
 
 - ``event:{event_id}``     planner workspace (chat, agents, board, decks)
 - ``session:{session_id}`` live presentation (slides, transcript, participants)
+
+The live-session types in `MIRRORED_SESSION_TYPES` are published on both the
+session topic and the owning event's topic, with identical data (each topic
+numbers its own copy). Transcript, audio and STT envelopes are session-only.
 """
 
 from __future__ import annotations
@@ -90,13 +94,20 @@ EMAIL_UPDATED = "email.updated"  # data: {email: EmailMessageOut}   drafted / se
 EMAIL_DELETED = "email.deleted"  # data: {email_id}
 LUMA_UPDATED = "luma.updated"  # data: {luma: LumaEventOut}  draft / publishing / published / failed
 
-# --- live sessions (topic: session) ------------------------------------------
-SESSION_UPDATED = "session.updated"  # data: {session: LiveSessionOut}  started / ended / settings
-SESSION_SLIDE_CHANGED = "session.slide.changed"  # data: {index, previous_index, reason, matched, by}
+# --- live sessions (topic: session; mirrored ones also on topic: event) ------
+# data: {session: LiveSessionOut}  started / ended / settings (mirrored; on create: event topic only)
+SESSION_UPDATED = "session.updated"
+# data: {session_id, index, previous_index, reason, matched, by}  (mirrored)
+SESSION_SLIDE_CHANGED = "session.slide.changed"
 SESSION_TRANSCRIPT_PARTIAL = "session.transcript.partial"  # data: {text, slide_index}
 SESSION_TRANSCRIPT_FINAL = "session.transcript.final"  # data: {segment: TranscriptSegmentOut}
-SESSION_PARTICIPANT_JOINED = "session.participant.joined"  # data: {participant: ParticipantOut}
-SESSION_PARTICIPANT_LEFT = "session.participant.left"  # data: {participant_id}
+SESSION_PARTICIPANT_JOINED = "session.participant.joined"  # data: {participant: ParticipantOut}  (mirrored)
+SESSION_PARTICIPANT_LEFT = "session.participant.left"  # data: {session_id, participant_id}  (mirrored)
 # data: {broadcasting, source_participant_id, listeners, codec, sample_rate}
 SESSION_AUDIO_STATE = "session.audio.state"
 SESSION_STT_STATE = "session.stt.state"  # data: {provider, status: connecting|active|error|stopped, error}
+
+#: Session envelopes that are also published on the owning event's topic.
+MIRRORED_SESSION_TYPES = frozenset(
+    {SESSION_UPDATED, SESSION_SLIDE_CHANGED, SESSION_PARTICIPANT_JOINED, SESSION_PARTICIPANT_LEFT}
+)

@@ -1,5 +1,6 @@
 from app.llm.base import (
     AgentResult,
+    LLMBillingError,
     LLMClient,
     LLMError,
     LLMRateLimitError,
@@ -14,6 +15,7 @@ from app.llm.base import (
 
 __all__ = [
     "AgentResult",
+    "LLMBillingError",
     "LLMClient",
     "LLMError",
     "LLMRateLimitError",

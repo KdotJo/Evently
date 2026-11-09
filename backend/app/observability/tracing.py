@@ -1,4 +1,4 @@
-"""Tiny tracing facade used by the agent runtime and the Claude client.
+"""Tiny tracing facade used by the agent runtime and the LLM clients.
 
 Both callers must keep working when the `otel` extra is not installed or when
 `OTEL_ENABLED` is false, so this module never imports the OpenTelemetry API at
@@ -11,7 +11,7 @@ module level and every helper degrades to a no-op:
         span.set_attribute("agent.status", "succeeded")
 
 `start_span()` makes the new span *current* for the duration of the block, so
-spans opened inside it (Claude requests, httpx, SQLAlchemy) become its children.
+spans opened inside it (LLM requests, httpx, SQLAlchemy) become its children.
 Exceptions are never swallowed; the caller decides what to record.
 """
 

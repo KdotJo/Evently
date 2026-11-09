@@ -137,7 +137,7 @@ def test_participants_are_marked_connected_and_announced(client, client_event):
             assert joined["topic"] == f"session:{sid}" and joined["seq"] > 0
             ws_bob.close()
             left, _ = receive_until(ws_ada, of_type(ev.SESSION_PARTICIPANT_LEFT))
-            assert left["data"] == {"participant_id": bob["participant"]["id"]}
+            assert left["data"] == {"session_id": sid, "participant_id": bob["participant"]["id"]}
 
 
 # --- commands ----------------------------------------------------------------------------
@@ -152,7 +152,14 @@ def test_host_controls_slides_and_bad_commands_get_errors(client, client_event):
 
         ws.send_json({"type": "slide.goto", "data": {"index": 2}, "ref": 1})
         changed, _ = receive_until(ws, of_type(ev.SESSION_SLIDE_CHANGED))
-        assert changed["data"] == {"index": 2, "previous_index": 0, "reason": "manual", "matched": None, "by": host_id}
+        assert changed["data"] == {
+            "session_id": sid,
+            "index": 2,
+            "previous_index": 0,
+            "reason": "manual",
+            "matched": None,
+            "by": host_id,
+        }
 
         ws.send_json({"type": "slide.prev"})
         changed, _ = receive_until(ws, of_type(ev.SESSION_SLIDE_CHANGED))

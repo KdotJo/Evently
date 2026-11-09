@@ -1,9 +1,14 @@
 """LLM abstraction used by every agent.
 
-Agents never import the Anthropic SDK directly. They call `ctx.llm.run(...)`
+Agents never import a provider SDK directly. They call `ctx.llm.run(...)`
 for a tool-using agent loop or `ctx.llm.parse(...)` for a schema-validated
-answer. `AnthropicLLM` talks to Claude; `ScriptedLLM` replays scripted turns in
-tests while executing the real tool handlers.
+answer. `AnthropicLLM` talks to Claude, `OpenAILLM` to OpenAI, and `RoutedLLM`
+picks one per `purpose`; `ScriptedLLM` replays scripted turns in tests while
+executing the real tool handlers.
+
+Messages in and out (`messages`, `AgentResult.new_messages`) are always in the
+Claude format, whichever provider serves the request, so a conversation can
+switch provider mid-way.
 """
 
 from __future__ import annotations
@@ -26,6 +31,13 @@ class LLMError(Exception):
 
 class LLMUnavailableError(LLMError):
     """No credentials are configured, or the provider rejected them."""
+
+
+class LLMBillingError(LLMUnavailableError):
+    """The provider rejected the request for billing/quota reasons (out of credits, no plan, quota used up).
+
+    `RoutedLLM` falls back to another configured provider on this error.
+    """
 
 
 class LLMRefusalError(LLMError):
@@ -159,7 +171,8 @@ class LLMClient(ABC):
         purpose: short label for the caller ("orchestrator", "venue_research"…);
             used for logging and by `ScriptedLLM` to pick a script.
         messages: Claude-format messages; the first must have role "user".
-        server_tools: raw Anthropic server-tool definitions (e.g. web search).
+        server_tools: raw Anthropic server-tool definitions (e.g. web search); other
+            providers translate the ones they have an equivalent for.
         tier: picks the default model/effort from settings unless given explicitly.
         """
 
@@ -183,12 +196,15 @@ class LLMClient(ABC):
 
 
 class UnconfiguredLLM(LLMClient):
-    """Placeholder used when no Anthropic credentials are present."""
+    """Placeholder used when a provider has no credentials."""
 
     available = False
 
+    def __init__(self, message: str = "Claude is not configured. Set ANTHROPIC_API_KEY in .env.") -> None:
+        self.message = message
+
     async def run(self, **_: Any) -> AgentResult:
-        raise LLMUnavailableError("Claude is not configured. Set ANTHROPIC_API_KEY in .env.")
+        raise LLMUnavailableError(self.message)
 
     async def parse(self, **_: Any) -> Any:
-        raise LLMUnavailableError("Claude is not configured. Set ANTHROPIC_API_KEY in .env.")
+        raise LLMUnavailableError(self.message)

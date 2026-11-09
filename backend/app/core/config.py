@@ -3,10 +3,29 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, get_args
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+LLMProvider = Literal["anthropic", "openai"]
+
+
+def parse_provider_overrides(raw: str) -> dict[str, str]:
+    """`"orchestrator=openai, presentations=openai"` → `{"orchestrator": "openai", "presentations": "openai"}`."""
+    routes: dict[str, str] = {}
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        purpose, sep, provider = (x.strip() for x in part.partition("="))
+        if not sep or not purpose or provider not in get_args(LLMProvider):
+            raise ValueError(
+                f"Bad LLM_PROVIDER_OVERRIDES entry {part!r}: expected purpose=provider with provider one of "
+                f"{', '.join(get_args(LLMProvider))}."
+            )
+        routes[purpose] = provider
+    return routes
 
 
 class Settings(BaseSettings):
@@ -28,6 +47,24 @@ class Settings(BaseSettings):
     # token act as a local dev user).
     auth_required: bool | None = None
 
+    # --- LLM routing ----------------------------------------------------
+    # Provider for every LLM call, unless LLM_PROVIDER_OVERRIDES routes a purpose elsewhere.
+    llm_provider: LLMProvider = "anthropic"
+    # Comma-separated `purpose=provider`; see .env.example for the purposes (and the
+    # `presentations` / `venues` groups). e.g. "orchestrator=openai,presentations=openai".
+    llm_provider_overrides: str = ""
+    # When a provider fails for billing/credential reasons (e.g. Claude out of credits), re-issue the call on
+    # this provider: auto = the other configured one, none = never fall back.
+    llm_fallback: Literal["auto", "none", "anthropic", "openai"] = "auto"
+    # How long a provider that failed that way is skipped before it is tried again (half-open probe).
+    llm_fallback_cooldown_s: int = Field(default=600, ge=0)
+    # Also fall back on rate limiting (429); such trips last at most 60 s.
+    llm_fallback_on_rate_limit: bool = False
+
+    # --- OpenAI (LLM; the key is shared with OpenAI transcription below) -----
+    openai_orchestrator_model: str = "gpt-6-astra"
+    openai_worker_model: str = "gpt-6-astra"
+
     # --- Claude ---------------------------------------------------------
     anthropic_api_key: str | None = None
     llm_orchestrator_model: str = "claude-opus-5-5"
@@ -36,7 +73,7 @@ class Settings(BaseSettings):
     llm_worker_effort: str = "medium"
     # Re-run a safety-classifier refusal on Anthropic's recommended fallback model.
     llm_refusal_fallbacks: bool = True
-    # Let research agents use Claude's hosted web search tool.
+    # Let research agents use the provider's hosted web search tool. Efforts above apply to both providers.
     llm_web_search: bool = True
     max_parallel_agents: int = 6
 
@@ -74,6 +111,8 @@ class Settings(BaseSettings):
     otel_enabled: bool = False
     otel_service_name: str = "evently-api"
     otel_exporter_otlp_endpoint: str | None = None  # e.g. https://ingress.<region>.dash0.com:4317
+    # grpc (default; Dash0 :4317) or http/protobuf (Dash0 :443 or :4318; endpoint WITHOUT /v1/traces).
+    otel_exporter_otlp_protocol: Literal["grpc", "http/protobuf"] = "grpc"
     otel_exporter_otlp_headers: str | None = None  # e.g. "Authorization=Bearer <dash0 token>"
     dash0_dataset: str | None = None
 
@@ -87,6 +126,16 @@ class Settings(BaseSettings):
     # --- infrastructure ---------------------------------------------------
     redis_url: str | None = None
     bus_history_size: int = Field(default=500, ge=0)
+
+    @field_validator("llm_provider_overrides")
+    @classmethod
+    def _check_overrides(cls, value: str) -> str:
+        parse_provider_overrides(value)
+        return value
+
+    @property
+    def llm_routes(self) -> dict[str, str]:
+        return parse_provider_overrides(self.llm_provider_overrides)
 
     @property
     def is_auth_required(self) -> bool:

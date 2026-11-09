@@ -47,7 +47,8 @@ Key decisions:
 - **One `AppContext`** (`app/core/context.py`) holds settings, DB sessionmaker, event bus, agent runtime, LLM and providers. Routers get it from `app.state.ctx`; background agents receive it explicitly. No module-level globals, so every test gets an isolated app.
 - **Agents are asyncio tasks, not processes.** `AgentRuntime.spawn()` persists an `AgentRun`, runs the coroutine under a concurrency semaphore, and publishes lifecycle events. This is what makes "a card per running agent" literal.
 - **Everything realtime goes through the `EventBus`** as typed envelopes on two topic families: `event:{event_id}` (planner workspace) and `session:{session_id}` (live presentation). WebSocket/SSE gateways only forward bus envelopes.
-- **Claude via the official `anthropic` SDK**, model `claude-opus-5-5` (configurable), adaptive thinking, streaming tool loop, prompt caching on the system prompt, server-side refusal fallbacks enabled. All Claude access goes through `app/llm` so tests use a scripted double.
+- **Claude via the official `anthropic` SDK**, model `claude-opus-5-5` (configurable), adaptive thinking, streaming tool loop, prompt caching on the system prompt, server-side refusal fallbacks enabled. All LLM access goes through `app/llm` so tests use a scripted double.
+- **OpenAI as an alternative provider** (`app/llm/openai_client.py`, `openai` SDK, Responses API, streaming, default model `gpt-6-astra`). `app/llm/factory.py` builds a `RoutedLLM` (`app/llm/router.py`) that picks the provider per `purpose`: `LLM_PROVIDER` sets the default, `LLM_PROVIDER_OVERRIDES` (`purpose=provider`, also `presentations` / `venues` / `chat` groups and `_`-prefixes) routes single features. Messages stay in the Claude format everywhere; the OpenAI client translates at its edge, so a chat can switch provider mid-conversation. Claude's web search server tool maps to OpenAI's hosted `web_search`. **Automatic fallback:** when a provider rejects a call for billing or credential reasons (`LLMBillingError`, e.g. Claude's "credit balance is too low" or OpenAI's `insufficient_quota`), `RoutedLLM` re-issues the same call on the other configured provider (`LLM_FALLBACK=auto|none|anthropic|openai`) and skips the failing one for `LLM_FALLBACK_COOLDOWN_S` (600 s) before probing it again; a `run()` is only re-issued if it failed before any tool ran. `/health` reports the state under `llm.fallback`.
 - **Slides are HTML artifacts.** Each slide is a self-contained HTML fragment (inline CSS/SVG, no scripts) rendered inside a sandboxed iframe, the same model as Claude artifacts. The server sanitises slide HTML and serves the deck with a strict CSP.
 - **Audio relay is deliberately simple first:** PCM16 mono frames over WebSocket with a small header, fanned out by an in-memory hub and teed into STT. LiveKit tokens are offered when configured, for larger rooms.
 
@@ -72,6 +73,28 @@ Envelope (JSON), identical on WebSocket and SSE:
 
 Event types are the constants in `app/realtime/events.py` (`chat.*`, `agent.run.*`, `board.*`,
 `presentation.*`, `slide.*`, `session.*`). Clients reconnect with `?since=<seq>` to replay missed envelopes. Ephemeral envelopes (`board.presence`) carry `seq: 0`, are never retained, and must not be used as a resume point.
+
+Event topic (`event:{id}`) extras:
+
+- `event.updated {event}` on `PATCH /events/{id}` (and when an agent rewrites `requirements`);
+  `event.deleted {event_id}` on `DELETE /events/{id}`. `board.updated {board}` on `PATCH /events/{id}/board`.
+- Live-session envelopes mirrored from `session:{id}` (`ev.MIRRORED_SESSION_TYPES`), with identical
+  `data`: `session.updated {session}` (started / ended / title, deck or settings changed; on creation it
+  goes to the event topic only), `session.slide.changed {session_id, index, previous_index, reason,
+  matched, by}`, `session.participant.joined {participant}`, `session.participant.left {session_id,
+  participant_id}`. Each topic numbers its own copy (`seq` stays per topic). Transcript, audio and STT
+  envelopes are never mirrored.
+
+REST additions for the frontend:
+
+- `GET /health` returns the typed `HealthOut` (adds `email_configured`, `email_provider`,
+  `luma_configured`, `search_configured`, `otel_enabled`, `stt_provider`); settings only, no network calls.
+- `GET /events/{id}/agent-runs?status=succeeded,failed&parent_run_id=…&limit=50` (newest first,
+  every state by default, `limit` ≤ 200; `?active=true` still means queued + running).
+- `GET /events/{id}/snapshot?include=slides,chat,emails,luma` adds `slides` (every deck's slides),
+  `chat` (newest 50, oldest first), `emails` and `luma` (or null); omitted parts are absent.
+- `GET /presentations/{id}/render` and `/slides/{id}/render` accept `?token=` (participant token of a
+  live session presenting that deck, or the owner's access token) for iframes.
 
 | Channel | Purpose |
 |---|---|
@@ -106,6 +129,7 @@ provider/transcription base types, router stubs, test fixtures.
 | 13 | Live session service + API + control WS | `app/live/service.py`, `app/api/live_sessions.py`, `app/api/ws_live.py` |
 | 14 | Audio broadcast | `app/live/audio_hub.py`, `app/live/stt_pipeline.py`, `app/live/livekit.py`, `app/api/ws_audio.py` |
 | 15 | Outreach: email + Luma | `app/integrations/*`, `app/api/outreach.py` |
+| 16 | Intake extraction: `POST /api/v1/intake/extract` (free text → intake answers, purpose `intake_extract`) | `app/api/intake.py` |
 
 Second wave, after integration: dev console (browser harness for mic/audio/slides) and the
 frontend-facing protocol reference, written against the real code.

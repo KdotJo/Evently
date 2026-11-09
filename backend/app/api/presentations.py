@@ -325,13 +325,18 @@ async def _viewer_presentation(
     token: str | None,
     credentials: HTTPAuthorizationCredentials | None,
 ) -> Presentation:
-    """The presentation for a render request: owner access, or a participant token of a live
-    session that is presenting this very deck (so attendees' phones can follow along)."""
+    """The presentation for a render request.
+
+    `?token=` (iframes cannot send headers) or the Bearer header may carry either a participant
+    token (host, speaker or listener) of a live session that is presenting this very deck and has
+    not ended — so attendees' phones can follow along — or the event owner's access token.
+    """
+    token = token or (credentials.credentials if credentials else None)
     if token:
         try:
             claims = decode_participant_token(ctx.settings, token)
         except TokenError:
-            claims = None
+            claims = None  # not a participant token; it may be the owner's access token
         if claims is not None:
             live = await session.get(LiveSession, claims.session_id)
             if live is not None and live.presentation_id == presentation_id and live.status != "ended":
@@ -339,7 +344,7 @@ async def _viewer_presentation(
                 if presentation is not None:
                     return presentation
             raise _not_found()
-    user = await resolve_user(ctx, credentials.credentials if credentials else None)
+    user = await resolve_user(ctx, token)
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated", {"WWW-Authenticate": "Bearer"})
     return await _load_presentation(session, presentation_id, user)
@@ -370,7 +375,10 @@ async def render_presentation(
     credentials: Credentials,
     slide: Annotated[int, Query(ge=0, description="0-based index of the slide shown first")] = 0,
     controls: Annotated[bool, Query(description="Keyboard/tap/swipe navigation and the slide counter")] = True,
-    token: Annotated[str | None, Query(description="Participant token of a live session showing this deck")] = None,
+    token: Annotated[
+        str | None,
+        Query(description="Participant token of a live session showing this deck, or the owner's access token"),
+    ] = None,
 ):
     """The whole deck as a presentable HTML page (CSP header, per-response script nonce)."""
     presentation = await _viewer_presentation(ctx, session, presentation_id, token, credentials)
@@ -395,7 +403,10 @@ async def render_slide(
     ctx: Ctx,
     session: Session,
     credentials: Credentials,
-    token: Annotated[str | None, Query(description="Participant token of a live session showing this deck")] = None,
+    token: Annotated[
+        str | None,
+        Query(description="Participant token of a live session showing this deck, or the owner's access token"),
+    ] = None,
 ):
     """One slide as a standalone document, for thumbnails and editors."""
     slide = await session.get(Slide, slide_id)

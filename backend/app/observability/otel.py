@@ -9,7 +9,7 @@ extra is optional. What it does:
 * Installs a `TracerProvider` + `MeterProvider` with OTLP gRPC exporters pointed at
   `settings.otel_exporter_otlp_endpoint`. Headers come from `settings.otel_exporter_otlp_headers`
   (`Authorization=Bearer <token>` for Dash0) plus `Dash0-Dataset` from `settings.dash0_dataset`.
-* Auto-instruments FastAPI (health checks excluded), httpx (so Claude / Google / STT calls
+* Auto-instruments FastAPI (health checks excluded), httpx (so Claude / OpenAI / Google / STT calls
   show up as client spans) and the SQLAlchemy engine once the app context exists.
 * Flushes and shuts the providers down after the app's own lifespan has finished.
 
@@ -89,8 +89,12 @@ def instrument_app(app: FastAPI, settings: Settings) -> None:
     try:
         from opentelemetry import metrics as otel_metrics
         from opentelemetry import trace
-        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        if settings.otel_exporter_otlp_protocol == "http/protobuf":
+            from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        else:
+            from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
         from opentelemetry.sdk.metrics import MeterProvider
         from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
         from opentelemetry.sdk.trace import TracerProvider
@@ -100,16 +104,21 @@ def instrument_app(app: FastAPI, settings: Settings) -> None:
         return
 
     endpoint = settings.otel_exporter_otlp_endpoint
+    # OTLP/HTTP exporters use an explicit `endpoint=` verbatim, so the signal paths are added here.
+    # (Useful when outbound 4317 is blocked: Dash0 accepts OTLP/HTTP on 443 but not gRPC.)
+    http = settings.otel_exporter_otlp_protocol == "http/protobuf"
+    traces_endpoint = f"{endpoint.rstrip('/')}/v1/traces" if http else endpoint
+    metrics_endpoint = f"{endpoint.rstrip('/')}/v1/metrics" if http else endpoint
     headers = parse_headers(settings.otel_exporter_otlp_headers, settings.dash0_dataset)
     resource = build_resource(settings)
 
     # Traces. Sampler honours OTEL_TRACES_SAMPLER / OTEL_TRACES_SAMPLER_ARG (default parentbased_always_on).
     tracer_provider = TracerProvider(resource=resource, shutdown_on_exit=False)
-    tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, headers=headers)))
+    tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=traces_endpoint, headers=headers)))
     trace.set_tracer_provider(tracer_provider)
 
     # Metrics. Export interval honours OTEL_METRIC_EXPORT_INTERVAL (default 60 s).
-    reader = PeriodicExportingMetricReader(OTLPMetricExporter(endpoint=endpoint, headers=headers))
+    reader = PeriodicExportingMetricReader(OTLPMetricExporter(endpoint=metrics_endpoint, headers=headers))
     meter_provider = MeterProvider(resource=resource, metric_readers=[reader], shutdown_on_exit=False)
     otel_metrics.set_meter_provider(meter_provider)
 

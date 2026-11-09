@@ -1,5 +1,8 @@
 import { ArrowRight, ArrowUp, Clock, Compass, Plus, Puzzle, Sparkles, Wrench, type LucideIcon } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
+import { serverTime } from '../features/chat/messages'
+import { useEventList } from '../features/events/api'
 import { AGENTS, EVENT_TYPES, INTEGRATION_LABEL } from '../data/workflows'
 import { INTEGRATION_ICON, INTEGRATION_LOGO, agentIcon } from '../lib/icons'
 import { loadRecent } from '../lib/recent'
@@ -32,16 +35,24 @@ const ago = (t: number) => {
 }
 
 interface Props {
+  /** The backend is reachable (and we're signed in): list saved events instead of this browser's history. */
+  online?: boolean
   onPick: (type: EventType, note?: string) => void
   onHome: () => void
 }
 
-export default function Landing({ onPick, onHome }: Props) {
+const eventTypeOf = (req: Record<string, unknown>): EventType | undefined =>
+  EVENT_TYPES.find((e) => e.id === req.event_type)?.id
+
+export default function Landing({ online = false, onPick, onHome }: Props) {
   const [draft, setDraft] = useState('')
   const [view, setView] = useState<View>('new')
   const [recent] = useState(loadRecent)
+  const saved = useEventList(online)
   const emoji = (t: EventType) => EVENT_TYPES.find((e) => e.id === t)!.emoji
   const label = (t: EventType) => EVENT_TYPES.find((e) => e.id === t)!.label
+  const rowClass =
+    'flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 hover:text-ink'
 
   const submit = () => {
     const lower = draft.toLowerCase()
@@ -79,7 +90,24 @@ export default function Landing({ onPick, onHome }: Props) {
             <Clock size={12} /> Recent Events
           </div>
           <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
-            {recent.length ? (
+            {online ? (
+              saved === null ? (
+                <p className="px-3 py-2 text-sm text-muted">Loading…</p>
+              ) : saved.length ? (
+                saved.map((ev) => {
+                  const type = eventTypeOf(ev.requirements)
+                  return (
+                    <Link key={ev.id} to={`/events/${encodeURIComponent(ev.id)}`} title={ev.description || ev.name} className={rowClass}>
+                      <span>{type ? emoji(type) : '📅'}</span>
+                      <span className="min-w-0 flex-1 truncate">{ev.name}</span>
+                      <span className="shrink-0 text-[11px] text-muted">{ago(serverTime(ev.updated_at))}</span>
+                    </Link>
+                  )
+                })
+              ) : (
+                <p className="px-3 py-2 text-sm text-muted">Events you start show up here.</p>
+              )
+            ) : recent.length ? (
               recent.map((r) => (
                 <button
                   key={r.at}

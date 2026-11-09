@@ -1,9 +1,11 @@
 import { Background, Controls, ReactFlow, type Edge, type ReactFlowInstance } from '@xyflow/react'
 import { ArrowLeft, Check, CheckCircle2, Link2, Loader2, MapPin, Users } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { EVENT_TYPES, INTEGRATION_LABEL, needsGoogle } from '../data/workflows'
+import { EVENT_TYPES, INTEGRATION_LABEL, gatedByGoogle } from '../data/workflows'
 import { layout, type Box } from '../lib/layout'
 import { addFields, addFormHeight, buildOption, type FieldKey } from '../lib/options'
+import type { RunnerContext } from '../lib/runners'
+import { useLiveVenueTasks } from '../features/venues/useLiveVenueTasks'
 import type { EventDetails, Task, TaskResult } from '../types'
 import ResultNode, { type Decision, type ResultItem, type ResultNodeType } from './ResultNode'
 import TaskNode, { type TaskNodeType } from './TaskNode'
@@ -30,6 +32,24 @@ interface Props {
   onAddOption: (id: string, result: TaskResult) => void
   onSelect: (id: string | null) => void
   onConnectGoogle: () => void
+  /** Backend context for result actions and live cards; null/absent for sample-only plans. */
+  ctx?: RunnerContext | null
+  /** Replace one option of a step (matched by `cardId`, else `title`). Without it the canvas keeps the edit locally. */
+  onUpdateResult?: (taskId: string, next: TaskResult) => void
+}
+
+// Identity of an option within its step: its board card when it has one, else its title.
+const sameResult = (a: TaskResult, b: TaskResult) => (a.cardId || b.cardId ? a.cardId === b.cardId : a.title === b.title)
+const resultKey = (taskId: string, r: TaskResult) => `${taskId}:${r.cardId ?? r.title}`
+
+// Local replacements (used when App doesn't handle onUpdateResult), applied over the step's results.
+function applyOverrides(tasks: Task[], overrides: Record<string, TaskResult[]>): Task[] {
+  if (!Object.keys(overrides).length) return tasks
+  return tasks.map((t) => {
+    const mine = overrides[t.id]
+    if (!mine?.length || !t.results) return t
+    return { ...t, results: t.results.map((r) => mine.find((o) => sameResult(o, r)) ?? r) }
+  })
 }
 
 // What fans out of an opened step: its results, or a placeholder while it can't show any yet.
@@ -53,17 +73,44 @@ function childItems(
   if (task.results)
     return [
       ...task.results.map((result, i): ResultItem => {
-        const key = `${task.id}:${result.title}`
+        const key = resultKey(task.id, result)
         return { kind: 'result', n: i + 1, result, decision: decisionFor(decisions, planApproved, key), implied: !decisions[key] && planApproved, planApproved }
       }),
       // Always last: lets the user add an option the agent missed.
       { kind: 'add', fields: addFields(task.id, templateOf(task)) },
     ]
-  if (needsGoogle(task.integration) && !googleConnected) return [{ kind: 'locked', integration: INTEGRATION_LABEL[task.integration] }]
+  if (gatedByGoogle(task) && !googleConnected) return [{ kind: 'locked', integration: INTEGRATION_LABEL[task.integration] }]
   return []
 }
 
-export default function WorkflowCanvas({ event, tasks, selectedId, googleConnected, approved, running, onApprove, onBack, onRunTask, onAddOption, onSelect, onConnectGoogle }: Props) {
+export default function WorkflowCanvas({
+  event,
+  tasks: rawTasks,
+  selectedId,
+  googleConnected,
+  approved,
+  running,
+  onApprove,
+  onBack,
+  onRunTask,
+  onAddOption,
+  onSelect,
+  onConnectGoogle,
+  ctx = null,
+  onUpdateResult,
+}: Props) {
+  // Edits kept here only when App doesn't take onUpdateResult.
+  const [overrides, setOverrides] = useState<Record<string, TaskResult[]>>({})
+  const edited = useMemo(() => applyOverrides(rawTasks, overrides), [rawTasks, overrides])
+  // Venue options follow their board cards live while research agents fill them in.
+  const tasks = useLiveVenueTasks(edited, ctx)
+  const updateResult = useCallback(
+    (taskId: string, next: TaskResult) => {
+      if (onUpdateResult) return onUpdateResult(taskId, next)
+      setOverrides((o) => ({ ...o, [taskId]: [...(o[taskId] ?? []).filter((r) => !sameResult(r, next)), next] }))
+    },
+    [onUpdateResult],
+  )
   // `open` is the step whose children are mounted; `spread` animates them out of / back into it.
   const [open, setOpen] = useState<string | null>(null)
   const [spread, setSpread] = useState(false)
@@ -128,7 +175,7 @@ export default function WorkflowCanvas({ event, tasks, selectedId, googleConnect
     const reviewedCount: Record<string, number> = {}
     for (const t of tasks) {
       for (const r of t.results ?? []) {
-        const d = decisionFor(decisions, approved, `${t.id}:${r.title}`)
+        const d = decisionFor(decisions, approved, resultKey(t.id, r))
         if (d) reviewedCount[t.id] = (reviewedCount[t.id] ?? 0) + 1
         if (d === 'approved') approvedCount[t.id] = (approvedCount[t.id] ?? 0) + 1
       }
@@ -136,7 +183,7 @@ export default function WorkflowCanvas({ event, tasks, selectedId, googleConnect
     return { approvedCount, reviewedCount }
   }, [tasks, decisions, approved])
 
-  const keyOf = (item: ResultItem) => (item.kind === 'result' ? `${open}:${item.result.title}` : '')
+  const keyOf = (item: ResultItem) => (item.kind === 'result' && open ? resultKey(open, item.result) : '')
 
   const toggleTodo = useCallback((key: string, i: number) => {
     setChecked((c) => {
@@ -183,6 +230,9 @@ export default function WorkflowCanvas({ event, tasks, selectedId, googleConnect
           position: { x: children[i].x, y: children[i].y },
           data: {
             item,
+            task: openTask!,
+            event,
+            ctx,
             size: { w: children[i].w, h: children[i].h },
             expanded: focus === i,
             city: event.city,
@@ -193,6 +243,7 @@ export default function WorkflowCanvas({ event, tasks, selectedId, googleConnect
             onConnectGoogle: connectAndRun,
             onRetry: () => open && onRunTask(open),
             onAdd: addOption,
+            onUpdateResult: (next: TaskResult) => open && updateResult(open, next),
           },
           draggable: false,
           selectable: false,
@@ -201,7 +252,7 @@ export default function WorkflowCanvas({ event, tasks, selectedId, googleConnect
         }),
       ),
     ],
-    [tasks, boxes, children, items, open, selectedId, spread, focus, checked, approvedCount, reviewedCount, googleConnected, approved, event.city, decide, toggleTodo, connectAndRun], // eslint-disable-line react-hooks/exhaustive-deps
+    [tasks, boxes, children, items, open, selectedId, spread, focus, checked, approvedCount, reviewedCount, googleConnected, approved, event, ctx, openTask, decide, toggleTodo, connectAndRun, updateResult], // eslint-disable-line react-hooks/exhaustive-deps
   )
 
   const flowRef = useRef<ReactFlowInstance<TaskNodeType | ResultNodeType> | null>(null)
@@ -322,7 +373,7 @@ export default function WorkflowCanvas({ event, tasks, selectedId, googleConnect
             onSelect(n.id)
             // First open of a step with nothing yet: send its agent to fetch results.
             const t = tasks.find((x) => x.id === n.id)
-            if (t && !t.results && t.status !== 'running' && !(needsGoogle(t.integration) && !googleConnected)) onRunTask(t.id)
+            if (t && !t.results && t.status !== 'running' && !(gatedByGoogle(t) && !googleConnected)) onRunTask(t.id)
           }}
           onPaneClick={() => onSelect(null)}
           onInit={(rf) => {

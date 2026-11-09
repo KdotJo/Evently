@@ -28,6 +28,14 @@ export interface TaskResult {
   todo?: string[]
   contact?: { name: string; role?: string; email?: string; phone?: string }
   draft?: string
+  // Links to backend objects (set by real runners; absent on sample data).
+  cardId?: string // board card (venue results)
+  agentRunId?: string // the agent run that produced/refines this result
+  presentationId?: string // deck built for this option
+  emailId?: string // drafted email for this option
+  lumaEventId?: string // Luma draft tied to this option
+  // Free-form extra data a feature module needs (scores, sections, status); keep it JSON-safe.
+  extra?: Record<string, unknown>
 }
 
 export interface Task {
