@@ -84,8 +84,20 @@ const WORKFLOWS: Record<EventType, TaskSeed[]> = {
   ],
 }
 
-export function buildWorkflow(type: EventType): Task[] {
-  return WORKFLOWS[type].map((s) => ({ ...s, dependsOn: [...s.dependsOn], status: 'idle' }))
+// `skip` drops steps a template doesn't need (see data/categories).
+export function buildWorkflow(type: EventType, skip: string[] = []): Task[] {
+  return skip.reduce(removeStep, WORKFLOWS[type].map((s): Task => ({ ...s, dependsOn: [...s.dependsOn], status: 'idle' })))
+}
+
+// Children of the removed step inherit its dependencies so the graph stays connected.
+export function removeStep(tasks: Task[], id: string): Task[] {
+  const gone = tasks.find((t) => t.id === id)
+  if (!gone) return tasks
+  return tasks
+    .filter((t) => t.id !== id)
+    .map((t) =>
+      t.dependsOn.includes(id) ? { ...t, dependsOn: [...new Set([...t.dependsOn.filter((d) => d !== id), ...gone.dependsOn])] } : t,
+    )
 }
 
 export const INTEGRATION_LABEL: Record<Integration, string> = {

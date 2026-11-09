@@ -7,15 +7,15 @@ import LoginPage, { type AuthMode } from './components/LoginPage'
 import MarketingPage from './components/MarketingPage'
 import PlanLoader from './components/PlanLoader'
 import WorkflowCanvas from './components/WorkflowCanvas'
-import { DEFAULT_HEADCOUNT, EVENT_TYPES, buildWorkflow, needsGoogle } from './data/workflows'
+import { DEFAULT_HEADCOUNT, EVENT_TYPES, buildWorkflow, needsGoogle, removeStep } from './data/workflows'
 import { runAgent } from './lib/agents'
 import { loadUser, signOut, type User } from './lib/auth'
 import { interpret, type ChatAction } from './lib/chat'
 import { extractAnswers, mergeFound } from './lib/extract'
 import { newDeckId } from './lib/deckStore'
-import { addRecent, savePlan, type RecentEvent, type Review } from './lib/recent'
+import { addRecent, savePlan, type RecentEvent, type Review, type SavedPlan } from './lib/recent'
 import { BUILD_NOW, QUESTIONS, SKIP, isRequired, missingRequired, nextQuestion, type IntakeAnswers } from './lib/intake'
-import type { ChatMessage, EventDetails, EventType, Task, TaskResult } from './types'
+import type { ChatMessage, EventDetails, EventType, PlanStart, Task, TaskResult } from './types'
 
 let msgSeq = 0
 const msg = (role: ChatMessage['role'], text: string): ChatMessage => ({ id: `m${++msgSeq}`, role, text })
@@ -48,18 +48,7 @@ function applyAction(tasks: Task[], a: ChatAction): Task[] {
       },
     ]
   }
-  if (a.kind === 'remove') {
-    const gone = tasks.find((t) => t.id === a.id)
-    if (!gone) return tasks
-    // Children of the removed step inherit its dependencies so the graph stays connected.
-    return tasks
-      .filter((t) => t.id !== a.id)
-      .map((t) =>
-        t.dependsOn.includes(a.id)
-          ? { ...t, dependsOn: [...new Set([...t.dependsOn.filter((d) => d !== a.id), ...gone.dependsOn])] }
-          : t,
-      )
-  }
+  if (a.kind === 'remove') return removeStep(tasks, a.id)
   return tasks
 }
 
@@ -67,9 +56,9 @@ export default function App() {
   // Mock account (see lib/auth). `signedIn` means past the marketing page, into the app.
   const [user, setUser] = useState<User | null>(loadUser)
   const [signedIn, setSignedIn] = useState(false)
-  // Sign-in / sign-up form on screen, and the event type to start once it's done.
+  // Sign-in / sign-up form on screen, and the plan to start once it's done.
   const [auth, setAuth] = useState<AuthMode | null>(null)
-  const [pendingType, setPendingType] = useState<EventType | null>(null)
+  const [pending, setPending] = useState<PlanStart | null>(null)
   const [event, setEvent] = useState<EventDetails | null>(null)
   // Scopes this plan's live-slide decks, so a new plan doesn't reuse the last one's slides.
   const [planId, setPlanId] = useState('')
@@ -100,9 +89,10 @@ export default function App() {
   const [review, setReview] = useState<Review>({ decisions: {}, progress: {} })
   const started = useRef(new Set<string>())
 
-  const pick = (type: EventType, note?: string) => {
+  // `skip`: steps a template leaves out.
+  const pick = (type: EventType, note?: string, skip?: string[]) => {
     const meta = EVENT_TYPES.find((e) => e.id === type)!
-    const wf = buildWorkflow(type)
+    const wf = buildWorkflow(type, skip)
     const id = newDeckId()
     addRecent({ id, type, note })
     // Pull headcount / city out of a free-text landing prompt like "200-person hackathon in Austin".
@@ -149,7 +139,7 @@ export default function App() {
   }
 
   // Reopens a recent event on the node map as it was saved; one that never got that far starts over.
-  const resume = (r: RecentEvent) => {
+  const resume = (r: Pick<RecentEvent, 'id' | 'type' | 'note' | 'plan'>) => {
     if (!r.plan) return pick(r.type, r.note)
     const p = r.plan
     ++pickSeq.current
@@ -170,6 +160,17 @@ export default function App() {
     setChatOpen(false)
     setSeen(p.messages.filter((m) => m.role === 'assistant').length)
   }
+
+  // Someone else's filled-out plan becomes a new event of the user's own, opened on the node map.
+  const copyPlan = (plan: SavedPlan, note: string) => {
+    const id = newDeckId()
+    addRecent({ id, type: plan.event.type, note })
+    resume({ id, type: plan.event.type, note, plan })
+    // Leave the welcome message unread so the chat badge points to it.
+    setSeen(0)
+  }
+
+  const start = (s: PlanStart) => ('copy' in s ? copyPlan(s.copy, s.note) : pick(s.type, s.note, s.skip))
 
   // Save the plan whenever it changes on the node map, so Recent Events reopens it there.
   const onMap = !!event && !intake && !building
@@ -266,7 +267,8 @@ export default function App() {
 
   const startRun = () => {
     started.current.clear()
-    setTasks((ts) => ts.map((t) => ({ ...t, status: 'queued', results: undefined })))
+    // Steps kept from a community plan stay done; agents fill in the rest.
+    setTasks((ts) => ts.map((t) => (t.shared && t.status === 'done' ? t : { ...t, status: 'queued', results: undefined })))
     setRunning(true)
   }
 
@@ -325,7 +327,7 @@ export default function App() {
   const runTask = (id: string) => {
     const task = tasks.find((t) => t.id === id)
     if (!task || !event) return
-    setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, status: 'running', results: undefined, error: undefined } : t)))
+    setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, status: 'running', results: undefined, error: undefined, shared: undefined } : t)))
     runAgent(task, event).then(
       (results) => setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, status: 'done', results } : t))),
       (e: unknown) => failTask(id, e),
@@ -339,13 +341,13 @@ export default function App() {
   }
 
   // Already signed in: skip the form and go straight into the app.
-  const enter = (mode: AuthMode, type?: EventType) => {
+  const enter = (mode: AuthMode, plan?: PlanStart) => {
     if (!user) {
-      setPendingType(type ?? null)
+      setPending(plan ?? null)
       return setAuth(mode)
     }
     setSignedIn(true)
-    if (type) pick(type)
+    if (plan) start(plan)
   }
 
   const signedInAs = (u: User) => {
@@ -354,8 +356,8 @@ export default function App() {
     setSignedIn(true)
     // Google sign-in also grants the Maps / Gmail / Calendar access the agents use.
     if (u.provider === 'google') setGoogleConnected(true)
-    if (pendingType) pick(pendingType)
-    setPendingType(null)
+    if (pending) start(pending)
+    setPending(null)
   }
 
   const logOut = () => {
@@ -370,7 +372,7 @@ export default function App() {
     if (auth)
       return <LoginPage mode={auth} onMode={setAuth} onDone={signedInAs} onBack={() => setAuth(null)} />
     return (
-      <MarketingPage onStart={() => enter('signup')} onSignIn={() => enter('signin')} onPlan={(type) => enter('signup', type)} />
+      <MarketingPage onStart={() => enter('signup')} onSignIn={() => enter('signin')} onPlan={(plan) => enter('signup', plan)} />
     )
   }
   if (!event)

@@ -104,18 +104,39 @@ body {
   }
 }
 
-/* Event-type ticker */
-.marquee {
-  animation: marquee 40s linear infinite;
+/* Landing hero: posters drifting around the headline. --r is each tile's resting tilt. */
+.float-tile {
+  transform: rotate(var(--r, 0deg));
+  animation: float-tile 9s ease-in-out infinite alternate;
 }
-@keyframes marquee {
+@keyframes float-tile {
+  from {
+    transform: translateY(0) rotate(var(--r, 0deg));
+  }
   to {
-    transform: translateX(-33.333%);
+    transform: translateY(-16px) rotate(calc(var(--r, 0deg) * -0.5));
+  }
+}
+/* Closing section: rows of plan cards in an endless loop. Tracks hold their cards twice, so
+   sliding by half returns to the start. Hovering a row pauses it. */
+.loop-track {
+  animation: loop-slide 70s linear infinite;
+}
+.loop-reverse {
+  animation-direction: reverse;
+}
+.loop-row:hover .loop-track {
+  animation-play-state: paused;
+}
+@keyframes loop-slide {
+  to {
+    transform: translateX(-50%);
   }
 }
 @media (prefers-reduced-motion: reduce) {
   .ribbon-wrap svg,
-  .marquee {
+  .float-tile,
+  .loop-track {
     animation: none;
   }
 }
@@ -151,4 +172,34 @@ body {
   .react-flow__node {
     transition: none;
   }
+}
+
+/* Landing-page category cards: on hover, a glow in the card's icon color (--glow) that follows the pointer (--x, --y). */
+.category-card::before,
+.category-card::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+.category-card::before {
+  inset: 0;
+  background: radial-gradient(260px circle at var(--x, 50%) var(--y, 110%), color-mix(in srgb, var(--glow) 22%, transparent), transparent 70%);
+}
+/* Edge highlight: a 1px ring masked to the area near the pointer. */
+.category-card::after {
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: radial-gradient(180px circle at var(--x, 50%) var(--y, 110%), var(--glow), transparent 70%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+.category-card:hover {
+  box-shadow: 0 12px 32px -12px color-mix(in srgb, var(--glow) 55%, transparent);
+}
+.category-card:hover::before,
+.category-card:hover::after {
+  opacity: 1;
 }

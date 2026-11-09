@@ -1,61 +1,56 @@
-import {
-  ArrowRight,
-  Bot,
-  Calendar,
-  Check,
-  ChevronRight,
-  Globe,
-  Loader2,
-  MapPin,
-  MessageSquare,
-  Sparkles,
-  Users,
-  UtensilsCrossed,
-  Workflow,
-} from 'lucide-react'
-import { useState, type ReactNode } from 'react'
-import { EVENT_TYPES, INTEGRATION_LABEL } from '../data/workflows'
-import { INTEGRATION_ICON, INTEGRATION_LOGO } from '../lib/icons'
-// Microsoft Fluent 3D emoji (MIT), from github.com/microsoft/fluentui-emoji.
-import businessArt from '../assets/fluent/business.png'
-import conferenceArt from '../assets/fluent/conference.png'
-import hackathonArt from '../assets/fluent/hackathon.png'
-import reunionArt from '../assets/fluent/reunion.png'
-import weddingArt from '../assets/fluent/wedding.png'
-import type { EventType, Integration } from '../types'
+import { ArrowRight, Mail, Sparkle, Sparkles } from 'lucide-react'
+import { useEffect, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
+import { CATEGORIES, findCategory } from '../data/categories'
+import { SHARED_PLANS, findSharedPlan, PLAN_ICON, when, type SharedPlan } from '../data/sharedPlans'
+import { AGENTS, INTEGRATION_LABEL } from '../data/workflows'
+import { INTEGRATION_LOGO, agentIcon } from '../lib/icons'
+import type { Integration, PlanStart } from '../types'
+import CategoryPage from './CategoryPage'
+import PlanPage from './PlanPage'
+import Poster, { type PosterId } from './Poster'
 
 const YEAR = new Date().getFullYear()
 
-interface Props {
-  onStart: () => void
-}
-
-interface PlanProps extends Props {
-  // Opens the sign-in form (onStart opens sign-up).
-  onSignIn: () => void
-  // Signs in and starts planning an event of this type.
-  onPlan: (type: EventType) => void
-}
-
 const REPO = 'https://github.com/KdotJo/Evently'
 
-export default function MarketingPage({ onStart, onSignIn, onPlan }: PlanProps) {
-  // The nav gets a solid backdrop once the page scrolls under it.
-  const [scrolled, setScrolled] = useState(false)
+interface Props {
+  // Opens the sign-up form.
+  onStart: () => void
+  // Opens the sign-in form.
+  onSignIn: () => void
+  // Signs in and starts a plan from a template or from someone's shared plan.
+  onPlan: (plan: PlanStart) => void
+}
+
+// The landing page, a category page (#/category/:id) or a shared plan (#/plan/:id).
+export default function MarketingPage({ onStart, onSignIn, onPlan }: Props) {
+  const [hash, setHash] = useState(location.hash)
+  useEffect(() => {
+    const onChange = () => setHash(location.hash)
+    window.addEventListener('hashchange', onChange)
+    return () => window.removeEventListener('hashchange', onChange)
+  }, [])
+  // In-page anchors (#categories) point into the landing page, which may only just have mounted.
+  useEffect(() => {
+    if (/^#\w/.test(hash)) document.getElementById(hash.slice(1))?.scrollIntoView({ behavior: 'smooth' })
+  }, [hash])
+
+  const category = findCategory(hash.match(/^#\/category\/([\w-]+)$/)?.[1] ?? '')
+  if (category) return <CategoryPage key={category.id} category={category} onPlan={onPlan} onSignIn={onSignIn} />
+  const shared = findSharedPlan(hash.match(/^#\/plan\/([\w-]+)$/)?.[1] ?? '')
+  if (shared) return <PlanPage key={shared.id} plan={shared} onPlan={onPlan} onSignIn={onSignIn} />
+
   return (
-    <div
-      onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 8)}
-      className="h-full overflow-y-auto bg-white text-gray-900 motion-safe:scroll-smooth"
-    >
-      <Nav onStart={onStart} onSignIn={onSignIn} scrolled={scrolled} />
-      <Hero onStart={onStart} />
-      <EventStrip />
-      <Features />
-      <Integrations onStart={onStart} />
-      <UseCases onStart={onStart} onPlan={onPlan} />
-      <HowItWorks />
-      <FinalCta onStart={onStart} onSignIn={onSignIn} />
-      <Footer onPlan={onPlan} />
+    <div className="h-full overflow-y-auto bg-paper text-ink motion-safe:scroll-smooth">
+      <Hero onStart={onStart} onSignIn={onSignIn} />
+      <div className="mx-auto max-w-6xl space-y-24 px-4 py-20 sm:px-6">
+        <Popular />
+        <Tools />
+        <Agents />
+        <Categories />
+      </div>
+      <FinalCta onStart={onStart} />
+      <Footer />
     </div>
   )
 }
@@ -73,46 +68,15 @@ export function Logo() {
   )
 }
 
-function PrimaryButton({ children, onClick }: { children: ReactNode; onClick?: () => void }) {
+// Indigo → violet → pink, the ribbon's colors, as on the hero and closing headlines.
+export function Glow({ children }: { children: ReactNode }) {
   return (
-    <button
-      onClick={onClick}
-      className="group inline-flex items-center gap-1.5 rounded-full bg-accent px-6 py-3 text-sm font-semibold text-white shadow-sm shadow-indigo-500/30 transition hover:bg-indigo-500"
-    >
-      {children}
-      <ChevronRight size={16} className="transition group-hover:translate-x-0.5" />
-    </button>
+    <span className="bg-[linear-gradient(90deg,#4f46e5,#7c3aed_40%,#c026d3_70%,#ec4899)] bg-clip-text text-transparent">{children}</span>
   )
 }
 
-function SecondaryButton({ children, onClick }: { children: ReactNode; onClick?: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 text-sm font-semibold text-accent ring-1 ring-gray-900/10 transition hover:ring-accent"
-    >
-      {children}
-    </button>
-  )
-}
-
-function TextLink({ children, onClick }: { children: ReactNode; onClick?: () => void }) {
-  return (
-    <button onClick={onClick} className="group inline-flex items-center gap-1 text-sm font-semibold text-accent">
-      {children}
-      <ChevronRight size={15} className="transition group-hover:translate-x-0.5" />
-    </button>
-  )
-}
-
-// Two-tone headline: dark lead sentence, muted continuation.
-function Heading({ lead, rest, dark = false, className = '' }: { lead: string; rest: string; dark?: boolean; className?: string }) {
-  return (
-    <h2 className={`text-3xl font-bold tracking-tight sm:text-4xl ${className}`}>
-      <span className={dark ? 'text-white' : 'text-gray-900'}>{lead}</span>{' '}
-      <span className={dark ? 'text-indigo-200/60' : 'text-gray-400'}>{rest}</span>
-    </h2>
-  )
+export function SectionTitle({ children }: { children: ReactNode }) {
+  return <h2 className="mb-6 text-2xl font-semibold tracking-tight sm:text-[28px]">{children}</h2>
 }
 
 export function GoogleG() {
@@ -126,121 +90,305 @@ export function GoogleG() {
   )
 }
 
-/* ---------- sections ---------- */
+/* ---------- hero ---------- */
 
-function Nav({ onStart, onSignIn, scrolled }: Props & { onSignIn: () => void; scrolled: boolean }) {
-  const bar = scrolled ? 'bg-white/80 shadow-lg shadow-indigo-500/5 ring-1 ring-gray-900/5 backdrop-blur-md' : ''
+// Posters floating around the hero headline. Positions are % of the hero; `r` is the resting tilt.
+const TILES: { id: PosterId; left: string; top: string; w: string; r: number; delay: number }[] = [
+  { id: 'boardgames', left: '36%', top: '-11%', w: '14.5%', r: -2, delay: 0 },
+  { id: 'summer', left: '20%', top: '11%', w: '10%', r: 3, delay: 1.2 },
+  { id: 'wedding', left: '5.5%', top: '29%', w: '7.5%', r: -4, delay: 2.4 },
+  { id: 'pitch', left: '10.5%', top: '48%', w: '12.5%', r: 2, delay: 0.6 },
+  { id: 'hack24', left: '-1.5%', top: '76%', w: '8.5%', r: -3, delay: 1.8 },
+  { id: 'founders', left: '25.5%', top: '80%', w: '11%', r: 2, delay: 3 },
+  { id: 'launch', left: '56.5%', top: '85%', w: '15%', r: -1, delay: 0.9 },
+  { id: 'offsite', left: '72%', top: '5%', w: '11%', r: 3, delay: 2.1 },
+  { id: 'devconf', left: '87%', top: '28%', w: '9.5%', r: -2, delay: 0.3 },
+  { id: 'runclub', left: '73%', top: '50%', w: '9%', r: 4, delay: 1.5 },
+  { id: 'reunion', left: '79%', top: '66%', w: '10.5%', r: -3, delay: 2.7 },
+]
+
+function Hero({ onStart, onSignIn }: Pick<Props, 'onStart' | 'onSignIn'>) {
   return (
-    <header className="group sticky top-0 z-30 px-3 pt-2">
-      <div className={`mx-auto flex max-w-7xl items-center gap-8 rounded-3xl px-4 py-3 transition duration-300 sm:px-6 ${bar} group-focus-within:bg-white group-focus-within:shadow-lg group-focus-within:shadow-indigo-500/5 group-focus-within:ring-1 group-focus-within:ring-gray-900/5 group-hover:bg-white group-hover:shadow-lg group-hover:shadow-indigo-500/5 group-hover:ring-1 group-hover:ring-gray-900/5`}>
-        <Logo />
-        <nav className="hidden items-center gap-7 text-sm font-medium text-gray-700 md:flex">
-          <a href="#features" className="hover:text-accent">Product</a>
-          <a href="#integrations" className="hover:text-accent">Integrations</a>
-          <a href="#use-cases" className="hover:text-accent">Use cases</a>
-          <a href="#how" className="hover:text-accent">How it works</a>
-        </nav>
-        <div className="ml-auto flex items-center gap-1 whitespace-nowrap sm:gap-2">
-          <button onClick={onSignIn} className="rounded-full px-4 py-2 text-sm font-semibold text-gray-700 hover:text-accent">
-            Sign in
-          </button>
-          <button
-            onClick={onStart}
-            className="inline-flex items-center gap-1 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
+    <section className="glow relative isolate flex min-h-[max(100svh,680px)] flex-col overflow-hidden">
+      <div aria-hidden className="absolute inset-0 hidden md:block">
+        {TILES.map((t) => (
+          <div
+            key={t.id}
+            className="float-tile absolute"
+            style={{ left: t.left, top: t.top, width: t.w, ['--r' as string]: `${t.r}deg`, animationDelay: `-${t.delay * 3}s` }}
           >
-            Get started <ChevronRight size={15} />
-          </button>
-        </div>
-      </div>
-    </header>
-  )
-}
-
-function Hero({ onStart }: Props) {
-  return (
-    // Pulled up under the sticky nav so the ribbon shows through its translucent background.
-    <section className="relative -mt-[72px] overflow-hidden pt-[72px]">
-      <Ribbon />
-
-      <div className="relative mx-auto grid max-w-7xl gap-16 px-6 pt-12 pb-20 lg:min-h-[calc(100svh-72px)] lg:grid-cols-[1.1fr_1fr] lg:items-center lg:py-12">
-        <div className="animate-rise">
-          <p className="mb-6 inline-flex items-center gap-2 rounded-full bg-white/70 px-3 py-1 text-sm text-gray-600 ring-1 ring-gray-900/10">
-            <span className="size-1.5 rounded-full bg-accent" />
-            Agents for event planning
-          </p>
-          <h1 className="text-5xl leading-[1.05] font-extrabold tracking-tight sm:text-6xl xl:text-7xl">
-            Plan any event with a team of AI agents.
-          </h1>
-          <p className="mt-6 max-w-xl text-xl leading-relaxed text-gray-500 xl:text-2xl">
-            Venues, catering, sponsors and invites — handled in one conversation.
-          </p>
-          <div className="mt-10 flex flex-wrap gap-3">
-            <PrimaryButton onClick={onStart}>Get started</PrimaryButton>
-            <SecondaryButton onClick={onStart}>
-              <GoogleG /> Sign up with Google
-            </SecondaryButton>
+            <div className="rounded-[22px] bg-white p-[5%] shadow-xl shadow-indigo-500/15 ring-1 ring-gray-900/5">
+              <Poster id={t.id} className="rounded-[14px]" />
+            </div>
           </div>
-        </div>
+        ))}
+        {/* Fades the bottom row into the next section. */}
+        <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-paper to-transparent" />
+      </div>
 
-        <HeroPreview />
+      <header className="relative z-10 flex items-center justify-between p-4 sm:p-6">
+        <Sparkle size={22} className="fill-accent text-accent" />
+        <button onClick={onSignIn} className="rounded-full bg-white/70 px-4 py-2 text-sm font-semibold text-gray-700 ring-1 ring-gray-900/10 backdrop-blur transition hover:text-accent hover:ring-accent">
+          Sign In
+        </button>
+      </header>
+
+      <div className="relative z-10 m-auto flex max-w-3xl animate-rise flex-col items-center px-4 pb-24 text-center">
+        <div className="flex items-center gap-1 text-3xl font-semibold tracking-tight text-gray-400">
+          evently <Sparkle size={14} className="-mt-4 fill-current" />
+        </div>
+        <h1 className="mt-5 text-6xl leading-[0.95] font-semibold tracking-tight sm:text-7xl xl:text-[88px]">
+          Delightful
+          <br />
+          events
+          <br />
+          <span className="sm:whitespace-nowrap"><Glow>planned for you</Glow></span>
+        </h1>
+        <p className="mt-8 max-w-xl text-lg leading-relaxed text-gray-500 sm:text-2xl">
+          From hackathons to weddings and reunions, Evently’s agents find the venue, book the caterer and send the invites.
+        </p>
+        <button
+          onClick={onStart}
+          className="mt-10 rounded-full bg-accent px-7 py-3.5 text-lg font-semibold text-white shadow-lg shadow-indigo-500/30 transition hover:bg-indigo-500"
+        >
+          Plan Your First Event
+        </button>
+        <a href="#categories" className="group mt-7 inline-flex items-center gap-2 text-lg font-medium text-accent transition hover:text-indigo-500">
+          Browse Templates <ArrowRight size={18} className="transition group-hover:translate-x-0.5" />
+        </a>
       </div>
     </section>
   )
 }
 
-function HeroPreview() {
-  const steps = [
-    { t: 'Location', s: 'done', i: MapPin },
-    { t: 'Sponsors', s: 'done', i: Users },
-    { t: 'Catering', s: 'running', i: UtensilsCrossed },
-    { t: 'Schedule', s: 'idle', i: Calendar },
-  ] as const
+/* ---------- landing sections ---------- */
+
+function Popular() {
+  const plans = [...SHARED_PLANS].sort((a, b) => a.in - b.in).slice(0, 6)
   return (
-    <div className="relative hidden animate-rise [animation-delay:150ms] lg:block">
-      <div className="rounded-[32px] bg-white/80 p-5 shadow-2xl ring-1 shadow-indigo-500/10 ring-gray-900/5 backdrop-blur">
-        <div className="mb-4 flex items-center gap-2 text-xs text-gray-500">
-          <span className="size-2.5 rounded-full bg-gray-200" />
-          <span className="size-2.5 rounded-full bg-gray-200" />
-          <span className="size-2.5 rounded-full bg-gray-200" />
-          <span className="ml-2 rounded-full bg-gray-100 px-3 py-0.5">evently.app/plan</span>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-3 rounded-3xl bg-gray-50 p-4">
-            <div className="ml-auto w-fit rounded-3xl rounded-br-lg bg-accent px-3.5 py-2 text-xs text-white">200-person hackathon in Austin</div>
-            <div className="w-fit rounded-3xl rounded-bl-lg bg-white px-3.5 py-2 text-xs shadow-sm ring-1 ring-gray-900/5">
-              Here’s a 10-step workflow. What would you like to edit?
-            </div>
-            <div className="ml-auto w-fit rounded-3xl rounded-br-lg bg-accent px-3.5 py-2 text-xs text-white">Add a photo booth</div>
-            <div className="w-fit rounded-3xl rounded-bl-lg bg-white px-3.5 py-2 text-xs shadow-sm ring-1 ring-gray-900/5">Done — added after Location.</div>
-          </div>
-          <div className="space-y-2.5">
-            {steps.map(({ t, s, i: Icon }) => (
-              <div
-                key={t}
-                className={`flex items-center gap-3 rounded-2xl border bg-white px-3.5 py-3 text-sm shadow-sm ${
-                  s === 'running' ? 'border-run ring-4 ring-run-soft' : s === 'done' ? 'border-accent/40' : 'border-line'
-                }`}
-              >
-                <Icon size={14} className="text-gray-400" />
-                <span className="font-semibold">{t}</span>
-                <span className="ml-auto">
-                  {s === 'done' && (
-                    <span className="grid size-5 place-items-center rounded-full bg-accent text-white">
-                      <Check size={11} strokeWidth={3} />
-                    </span>
-                  )}
-                  {s === 'running' && <Loader2 size={15} className="animate-spin text-run" />}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
+    <section>
+      <SectionTitle>
+        Popular Plans <span className="text-accent">This Week</span>
+      </SectionTitle>
+      <div className="-mx-4 flex snap-x gap-5 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6 lg:mx-0 lg:grid lg:grid-cols-6 lg:overflow-visible lg:px-0">
+        {plans.map((e) => (
+          <a key={e.id} href={`#/plan/${e.id}`} className="group w-40 shrink-0 snap-start lg:w-auto">
+            <Poster id={e.poster} className="rounded-2xl shadow-lg shadow-indigo-500/10 ring-1 ring-gray-900/5 transition group-hover:-translate-y-1" />
+            <h3 className="mt-3 line-clamp-2 text-lg leading-snug font-medium transition group-hover:text-accent">{e.title}</h3>
+            <p className="mt-1.5 text-muted">{when(e)}</p>
+            <p className="mt-0.5 truncate text-sm text-gray-400">By {e.host}</p>
+          </a>
+        ))}
       </div>
-    </div>
+    </section>
   )
 }
 
-/* ---------- hero ribbon ---------- */
+function Tools() {
+  const tools: Integration[] = ['google-maps', 'linkedin', 'gmail', 'luma']
+  return (
+    <section>
+      <SectionTitle>Works With Your Tools</SectionTitle>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {tools.map((id) => {
+          const agents = AGENTS.filter((a) => a.integration === id).map((a) => a.name)
+          return (
+            <div key={id} className="flex items-center gap-4 rounded-2xl bg-white ring-1 ring-gray-900/5 shadow-sm shadow-indigo-500/5 p-4">
+              <span className="grid size-14 shrink-0 place-items-center rounded-xl bg-gray-50 ring-1 ring-gray-900/5">
+                <img src={INTEGRATION_LOGO[id]} alt="" className="size-8 object-contain" />
+              </span>
+              <div className="min-w-0">
+                <div className="text-xl font-medium">{INTEGRATION_LABEL[id]}</div>
+                <div className="truncate text-muted">{agents.join(' · ')}</div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+// Rotating icon tints for the agent cards.
+const TINTS = ['#4f46e5', '#0284c7', '#7c3aed', '#db2777', '#c026d3', '#0891b2', '#2563eb', '#9333ea']
+
+function Agents() {
+  return (
+    <section>
+      <SectionTitle>Meet Your Agents</SectionTitle>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {AGENTS.slice(0, 8).map((a, i) => {
+          const Icon = agentIcon(a.name)
+          return (
+            <div key={a.name} className="rounded-2xl bg-white ring-1 ring-gray-900/5 shadow-sm shadow-indigo-500/5 p-6">
+              <span className="grid size-14 place-items-center rounded-xl" style={{ background: `${TINTS[i]}14`, color: TINTS[i] }}>
+                <Icon size={26} />
+              </span>
+              <h3 className="mt-5 text-xl font-medium">{a.name}</h3>
+              <p className="mt-1.5 line-clamp-2 text-muted">{a.example}</p>
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+// Feeds the pointer position to .category-card's glow as --x / --y.
+function trackGlow(e: MouseEvent<HTMLElement>) {
+  const card = e.currentTarget
+  const r = card.getBoundingClientRect()
+  card.style.setProperty('--x', `${e.clientX - r.left}px`)
+  card.style.setProperty('--y', `${e.clientY - r.top}px`)
+}
+
+function Categories() {
+  return (
+    <section id="categories" className="scroll-mt-10">
+      <SectionTitle>Browse by Category</SectionTitle>
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 lg:gap-6">
+        {CATEGORIES.map(({ id, label, icon: Icon, color }) => (
+          <a
+            key={id}
+            href={`#/category/${id}`}
+            style={{ '--glow': color } as CSSProperties}
+            onMouseMove={trackGlow}
+            className="category-card relative flex h-36 flex-col justify-between overflow-hidden rounded-2xl bg-white ring-1 ring-gray-900/5 shadow-sm shadow-indigo-500/5 p-5 transition hover:-translate-y-0.5 sm:h-40 sm:p-6"
+          >
+            <Icon size={30} strokeWidth={1.6} style={{ color }} className="relative" />
+            <span className="relative text-lg font-medium sm:text-xl">{label}</span>
+          </a>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+/* ---------- closing ---------- */
+
+// Each row starts at a different plan and some run backwards, so no two rows line up.
+const LOOP_ROWS = [
+  { offset: 0, seconds: 70, reverse: false },
+  { offset: 4, seconds: 85, reverse: true },
+  { offset: 8, seconds: 65, reverse: false },
+  { offset: 12, seconds: 90, reverse: true },
+  { offset: 16, seconds: 75, reverse: false },
+  { offset: 20, seconds: 80, reverse: true },
+]
+
+// Theme gradients for the loop cards' icon tiles, picked by the plan's place in the list.
+const TILE = [
+  'from-indigo-500 to-violet-500', 'from-sky-400 to-indigo-500', 'from-fuchsia-500 to-pink-500',
+  'from-violet-500 to-fuchsia-500', 'from-pink-400 to-rose-500', 'from-cyan-400 to-sky-500',
+]
+
+function LoopCard({ plan: p, index }: { plan: SharedPlan; index: number }) {
+  const Icon = PLAN_ICON[p.id]
+  return (
+    <a
+      href={`#/plan/${p.id}`}
+      className="group flex w-72 shrink-0 items-center gap-3 rounded-2xl bg-white p-3 shadow-sm ring-1 shadow-indigo-500/5 ring-gray-900/5 transition hover:shadow-lg hover:ring-accent/30"
+    >
+      <span className={`grid size-16 shrink-0 place-items-center rounded-xl bg-gradient-to-br text-white shadow-sm ${TILE[index % TILE.length]}`}>
+        <Icon size={28} strokeWidth={1.8} />
+      </span>
+      <div className="min-w-0">
+        <div className="truncate font-semibold transition group-hover:text-accent">{p.title}</div>
+        <div className="truncate text-sm text-muted">
+          {p.host} · {p.city}
+        </div>
+        <div className="mt-1 text-xs font-medium text-accent">{Object.keys(p.picks).length} steps planned</div>
+      </div>
+    </a>
+  )
+}
+
+function FinalCta({ onStart }: Pick<Props, 'onStart'>) {
+  return (
+    <section className="relative isolate overflow-hidden py-16">
+      {/* Rows of community plans scrolling forever; each track holds the list twice so the loop is seamless. */}
+      <div className="space-y-5 [mask-image:linear-gradient(to_right,transparent,black_12%,black_88%,transparent)]">
+        {LOOP_ROWS.map(({ offset, seconds, reverse }) => {
+          const row = [...SHARED_PLANS.slice(offset), ...SHARED_PLANS.slice(0, offset)]
+          return (
+            <div key={offset} className="loop-row overflow-hidden">
+              <div
+                className={`loop-track flex w-max gap-4 pr-4 ${reverse ? 'loop-reverse' : ''}`}
+                style={{ animationDuration: `${seconds}s` }}
+              >
+                {[...row, ...row].map((p, i) => (
+                  <LoopCard key={`${p.id}-${i}`} plan={p} index={SHARED_PLANS.indexOf(p)} />
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Headline over a soft white pool so it reads above the moving cards. */}
+      <div className="pointer-events-none absolute inset-0 grid place-items-center bg-[radial-gradient(ellipse_44%_38%_at_center,white_50%,rgba(255,255,255,0.8)_70%,transparent)] px-4">
+        <div className="pointer-events-auto max-w-3xl text-center">
+          <h2 className="text-5xl leading-tight font-semibold tracking-tight sm:text-6xl">
+            <Glow>Let us plan while you experience.</Glow>
+          </h2>
+          <div className="mt-8 flex flex-wrap justify-center gap-4">
+            <button onClick={onStart} className="rounded-full bg-accent px-6 py-3 text-lg font-semibold text-white shadow-lg shadow-indigo-500/30 transition hover:bg-indigo-500">
+              Start Planning
+            </button>
+            <a href="#/present/demo" className="rounded-full bg-white px-6 py-3 text-lg font-semibold text-accent ring-1 ring-gray-900/10 transition hover:ring-accent">
+              Try Live Slides
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function GitHubMark() {
+  return (
+    <svg viewBox="0 0 16 16" className="size-5" fill="currentColor" aria-hidden>
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
+    </svg>
+  )
+}
+
+export function Footer() {
+  const links = [
+    { label: 'Templates', href: '#categories' },
+    { label: 'Live Slides', href: '#/present/demo' },
+    { label: 'GitHub', href: REPO },
+    { label: 'Help', href: `${REPO}/issues` },
+  ]
+  const external = (href: string) => (href.startsWith('http') ? { target: '_blank', rel: 'noreferrer' } : {})
+  return (
+    <footer className="mx-auto max-w-6xl px-4 sm:px-6">
+      <div className="flex flex-wrap items-center gap-x-8 gap-y-4 border-t border-gray-900/5 py-8">
+        <a href="#">
+          <Logo />
+        </a>
+        <nav className="flex flex-wrap gap-6 text-gray-600">
+          {links.map((l) => (
+            <a key={l.label} href={l.href} {...external(l.href)} className="transition hover:text-accent">
+              {l.label}
+            </a>
+          ))}
+        </nav>
+        <div className="ml-auto flex items-center gap-5 text-gray-500">
+          <a href={REPO} {...external(REPO)} aria-label="GitHub" className="hover:text-accent">
+            <GitHubMark />
+          </a>
+          <a href={`${REPO}/issues`} {...external(REPO)} aria-label="Contact" className="hover:text-accent">
+            <Mail size={20} />
+          </a>
+        </div>
+      </div>
+      <p className="pb-10 text-sm text-gray-400">© {YEAR} Evently</p>
+    </footer>
+  )
+}
+
+/* ---------- sign-in backdrop ---------- */
 
 type Pt = [number, number]
 type Curve = [Pt, Pt, Pt, Pt]
@@ -309,480 +457,5 @@ export function Ribbon() {
         <path d={d(EDGE_IN)} fill="none" stroke="url(#rb-edge)" strokeWidth="3" opacity="0.8" />
       </svg>
     </div>
-  )
-}
-
-function EventStrip() {
-  const items = [...EVENT_TYPES, ...EVENT_TYPES, ...EVENT_TYPES]
-  return (
-    <section className="border-y border-gray-900/5 bg-white/60 py-7">
-      <div className="mx-auto max-w-7xl overflow-hidden px-6 [mask-image:linear-gradient(to_right,transparent,black_10%,black_90%,transparent)]">
-        <div className="marquee flex w-max gap-14">
-          {items.map((e, i) => (
-            <div key={i} className="flex items-center gap-3 text-xl font-semibold whitespace-nowrap text-gray-400">
-              <span className="text-2xl grayscale-[30%]">{e.emoji}</span>
-              {e.label}
-              <span className="text-sm font-normal text-gray-300">{e.blurb}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function FeatureCard({ title, className = '', children }: { title: string; className?: string; children: ReactNode }) {
-  return (
-    // Not positioned below the card itself, so each card's gradient wash fills it edge to edge.
-    <div className={`relative flex flex-col overflow-hidden rounded-[32px] bg-white ring-1 ring-gray-900/5 ${className}`}>
-      <h3 className="relative z-10 p-7 pb-0 text-2xl font-semibold tracking-tight">{title}</h3>
-      <div className="flex flex-1 items-end p-7">{children}</div>
-    </div>
-  )
-}
-
-function Features() {
-  return (
-    <section id="features" className="bg-gray-50/70 py-28">
-      <div className="mx-auto max-w-7xl px-6">
-        <Heading
-          lead="Everything an event needs, in one workflow."
-          rest="Evently turns your idea into a plan, then assigns an agent to every step — designed to work on its own or together."
-          className="max-w-4xl"
-        />
-
-        <div className="mt-14 grid gap-4 md:grid-cols-6">
-          <FeatureCard title="Describe your event, get a plan" className="md:col-span-4">
-            <div className="absolute inset-0 bg-gradient-to-br from-transparent via-indigo-100/60 to-pink-200/70" />
-            <div className="relative grid w-full gap-4 sm:grid-cols-2">
-              <div className="space-y-2 rounded-3xl bg-white p-4 shadow-lg ring-1 ring-gray-900/5">
-                <div className="text-xs font-semibold text-accent">Evently</div>
-                <p className="text-sm">What event are you planning?</p>
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {EVENT_TYPES.map((e) => (
-                    <span key={e.id} className={`rounded-full px-2.5 py-1 text-xs ring-1 ${e.id === 'wedding' ? 'bg-accent text-white ring-accent' : 'ring-gray-900/10'}`}>
-                      {e.emoji} {e.label}
-                    </span>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-2 rounded-3xl bg-white p-4 shadow-lg ring-1 ring-gray-900/5">
-                {['Budget & vision', 'Guest list', 'Location', 'Catering', 'Photographer', 'Invitations'].map((s, i) => (
-                  <div key={s} className="flex items-center gap-2 text-sm">
-                    <span className="grid size-5 place-items-center rounded-full bg-accent-soft font-mono text-[10px] text-accent">{i + 1}</span>
-                    {s}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </FeatureCard>
-
-          <FeatureCard title="Edit it like a conversation" className="md:col-span-2">
-            <div className="absolute inset-0 bg-gradient-to-b from-transparent to-violet-300/70" />
-            <div className="relative w-full space-y-2">
-              {['Make it 300 people', 'Remove judges', 'Move it to Austin'].map((m) => (
-                <div key={m} className="ml-auto w-fit rounded-3xl rounded-br-lg bg-accent px-4 py-2 text-sm text-white shadow">
-                  {m}
-                </div>
-              ))}
-              <div className="w-fit rounded-3xl rounded-bl-lg bg-white px-4 py-2 text-sm shadow ring-1 ring-gray-900/5">Updated — 3 changes.</div>
-            </div>
-          </FeatureCard>
-
-          <FeatureCard title="Find venues on Google Maps" className="md:col-span-2">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_60%,#e0e7ff,transparent_60%),radial-gradient(circle_at_80%_80%,#bae6fd,transparent_55%)]" />
-            <div className="relative w-full rounded-3xl bg-white p-4 shadow-lg ring-1 ring-gray-900/5">
-              <div className="relative mb-3 h-28 overflow-hidden rounded-2xl bg-[linear-gradient(135deg,#eef2ff,#f0f9ff)]">
-                <div className="absolute inset-0 bg-[linear-gradient(90deg,transparent_48%,#fff_48%,#fff_52%,transparent_52%),linear-gradient(0deg,transparent_45%,#fff_45%,#fff_50%,transparent_50%)] opacity-80" />
-                {[
-                  ['20%', '30%'],
-                  ['62%', '55%'],
-                  ['40%', '70%'],
-                ].map(([l, t]) => (
-                  <MapPin key={l} size={20} className="absolute fill-accent text-white" style={{ left: l, top: t }} />
-                ))}
-              </div>
-              {['Innovation Hub · fits 240', 'The Foundry · fits 200'].map((v) => (
-                <div key={v} className="border-t border-gray-100 py-1.5 text-xs text-gray-600 first:border-0">{v}</div>
-              ))}
-            </div>
-          </FeatureCard>
-
-          <FeatureCard title="Agents run in parallel" className="md:col-span-2">
-            <div className="absolute inset-0 bg-gradient-to-b from-transparent to-sky-200/70" />
-            <div className="relative w-full space-y-2">
-              {[
-                ['Sponsor Hunter', 'done'],
-                ['Caterer', 'running'],
-                ['Tech Ops', 'running'],
-                ['Scheduler', 'queued'],
-              ].map(([a, s]) => (
-                <div key={a} className="flex items-center gap-2 rounded-2xl bg-white px-3.5 py-2.5 text-sm shadow ring-1 ring-gray-900/5">
-                  <Bot size={14} className="text-accent" />
-                  {a}
-                  <span className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-semibold ${s === 'done' ? 'bg-accent text-white' : s === 'running' ? 'bg-run-soft text-accent' : 'bg-gray-100 text-gray-500'}`}>
-                    {s}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </FeatureCard>
-
-          <FeatureCard title="Live slides with a QR code" className="md:col-span-2">
-            <div className="absolute inset-0 bg-gradient-to-br from-transparent via-pink-100/70 to-indigo-200/80" />
-            <div className="relative mx-auto flex items-center gap-4 rounded-3xl bg-white p-4 shadow-lg ring-1 ring-gray-900/5">
-              <div className="grid size-24 grid-cols-7 gap-0.5 rounded-xl bg-white p-1.5 ring-1 ring-gray-200">
-                {Array.from({ length: 49 }, (_, i) => (
-                  <span key={i} className={`rounded-[2px] ${[0, 1, 2, 7, 9, 14, 15, 16, 4, 5, 6, 11, 13, 18, 19, 20, 28, 29, 30, 35, 37, 42, 43, 44, 24, 26, 32, 40, 46, 22, 38].includes(i) ? 'bg-gray-900' : 'bg-transparent'}`} />
-                ))}
-              </div>
-              <div className="text-xs">
-                <div className="font-semibold">Opening keynote</div>
-                <div className="text-gray-500">Scan to follow along</div>
-                <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold text-accent">
-                  <span className="size-1.5 animate-pulse rounded-full bg-accent" /> Live
-                </div>
-                <div className="mt-3 flex flex-col gap-1">
-                  <a href="#/present/demo" className="flex items-center gap-0.5 font-semibold text-accent hover:underline">
-                    Try the demo <ChevronRight size={13} />
-                  </a>
-                  <a href="#/present/new" className="flex items-center gap-0.5 font-semibold text-accent hover:underline">
-                    Upload your slides <ChevronRight size={13} />
-                  </a>
-                </div>
-              </div>
-            </div>
-          </FeatureCard>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function Integrations({ onStart }: Props) {
-  const tools: { id: Integration; pos: string }[] = [
-    { id: 'google-maps', pos: 'sm:left-[6%] sm:top-[12%]' },
-    { id: 'gmail', pos: 'sm:right-[6%] sm:top-[12%]' },
-    { id: 'google-calendar', pos: 'sm:left-0 sm:top-1/2 sm:-translate-y-1/2' },
-    { id: 'google-contacts', pos: 'sm:right-0 sm:top-1/2 sm:-translate-y-1/2' },
-    { id: 'google-slides', pos: 'sm:left-[6%] sm:bottom-[12%]' },
-    { id: 'web', pos: 'sm:right-[6%] sm:bottom-[12%]' },
-  ]
-  return (
-    <section id="integrations" className="relative overflow-hidden bg-[#0f1033] py-28 text-white">
-      <div aria-hidden className="pointer-events-none absolute -right-40 bottom-0 h-[500px] w-[900px] rounded-full bg-[conic-gradient(from_180deg,#6366f1,#ec4899,#8b5cf6,#38bdf8,#6366f1)] opacity-25 blur-3xl" />
-      <div className="relative mx-auto max-w-7xl px-6">
-        <Heading
-          dark
-          lead="Agents that work in the tools you already use."
-          rest="Connect your Google account once and every agent can search, draft and schedule on your behalf."
-          className="max-w-4xl"
-        />
-        <div className="mt-10">
-          <PrimaryButton onClick={onStart}>Connect Google</PrimaryButton>
-        </div>
-
-        {/* Hub diagram; a plain list of pills on phones, where the spokes would overlap */}
-        <div className="relative mx-auto mt-14 flex max-w-3xl flex-wrap justify-center gap-3 sm:mt-20 sm:block sm:h-80 rounded-[40px] bg-[radial-gradient(#ffffff14_1px,transparent_1px)] [background-size:16px_16px]">
-          <svg className="absolute inset-0 hidden size-full sm:block" aria-hidden>
-            {[
-              ['20%', '22%'],
-              ['80%', '22%'],
-              ['10%', '50%'],
-              ['90%', '50%'],
-              ['20%', '78%'],
-              ['80%', '78%'],
-            ].map(([x, y]) => (
-              <line key={x + y} x1="50%" y1="50%" x2={x} y2={y} stroke="#818cf8" strokeOpacity="0.5" strokeDasharray="3 5" />
-            ))}
-          </svg>
-          <div className="absolute top-1/2 left-1/2 hidden size-24 sm:grid -translate-x-1/2 -translate-y-1/2 place-items-center rounded-[28px] bg-gradient-to-br from-indigo-500 to-violet-600 shadow-2xl shadow-indigo-500/50">
-            <Sparkles size={30} />
-          </div>
-          {tools.map(({ id, pos }) => {
-            const Icon = INTEGRATION_ICON[id]
-            const logo = INTEGRATION_LOGO[id]
-            return (
-              <div key={id} className={`flex items-center gap-2 rounded-full bg-white sm:absolute px-4 py-2 text-sm font-medium text-gray-900 shadow-lg shadow-black/30 ${pos}`}>
-                {logo ? <img src={logo} alt="" className="size-4 object-contain" /> : <Icon size={14} className="text-gray-500" />}
-                <span className="whitespace-nowrap">{INTEGRATION_LABEL[id]}</span>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function UseCases({ onStart, onPlan }: Props & Pick<PlanProps, 'onPlan'>) {
-  // top/mid: card gradient stops; glow: the object's floor shadow.
-  const cases = [
-    { type: 'hackathon', art: hackathonArt, top: '#c4b5fd', mid: '#ede9fe', glow: '#7c3aed', line: 'Sponsors, prizes, judges and a 24-hour schedule.' },
-    { type: 'conference', art: conferenceArt, top: '#93c5fd', mid: '#e0efff', glow: '#2563eb', line: 'Speakers, tracks, ticketing and hotel blocks.' },
-    { type: 'wedding', art: weddingArt, top: '#f9a8d4', mid: '#fde4f1', glow: '#db2777', line: 'Venue, vendors, guest list and the day-of timeline.' },
-    { type: 'business', art: businessArt, top: '#818cf8', mid: '#e0e7ff', glow: '#4338ca', line: 'Offsites and launches with invites and follow-ups.' },
-    { type: 'reunion', art: reunionArt, top: '#fdc29a', mid: '#fbe3ef', glow: '#e1497f', line: 'Find old friends, poll a date, share the photos.' },
-  ] as const
-  return (
-    <section id="use-cases" className="py-28">
-      <div className="mx-auto max-w-7xl px-6">
-        <div className="grid gap-8 lg:grid-cols-2 lg:items-end">
-          <div>
-            <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">A workflow for every kind of event</h2>
-            <div className="mt-6">
-              <PrimaryButton onClick={onStart}>Start planning</PrimaryButton>
-            </div>
-          </div>
-          <p className="text-lg text-gray-500 lg:max-w-md lg:justify-self-end">
-            Each template comes with the steps planners actually use — and every step can be edited, removed or handed to an agent.
-          </p>
-        </div>
-
-        <div className="-mx-6 mt-14 flex snap-x gap-4 overflow-x-auto px-6 pb-4 lg:mx-0 lg:grid lg:grid-cols-5 lg:overflow-visible lg:px-0 lg:pb-0">
-          {cases.map(({ type, art, top, mid, glow, line }) => {
-            const meta = EVENT_TYPES.find((e) => e.id === type)!
-            return (
-              <div
-                key={type}
-                className="group relative flex h-[27rem] w-72 shrink-0 snap-start flex-col overflow-hidden rounded-[32px] shadow-xl ring-1 shadow-indigo-500/10 ring-gray-900/5 lg:w-auto"
-                style={{ background: `linear-gradient(170deg, ${top} 0%, ${mid} 55%, #f8f7ff 100%)` }}
-              >
-                <Swooshes />
-                <div className="relative h-56 shrink-0">
-                  <Orbit half="back" />
-                  <span
-                    aria-hidden
-                    className="absolute bottom-11 left-1/2 h-4 w-28 -translate-x-1/2 rounded-[50%] opacity-40 blur-md transition duration-500 group-hover:w-24 group-hover:opacity-30"
-                    style={{ background: glow }}
-                  />
-                  <img
-                    src={art}
-                    alt=""
-                    className="absolute top-[44%] left-1/2 size-32 -translate-x-1/2 -translate-y-1/2 -rotate-6 drop-shadow-[0_20px_16px_rgba(30,27,75,0.28)] transition duration-500 select-none motion-safe:group-hover:-translate-y-[58%] motion-safe:group-hover:rotate-0"
-                  />
-                  <Orbit half="front" />
-                </div>
-                <div className="relative mt-auto p-6">
-                  <h3 className="text-2xl font-bold tracking-tight text-gray-900">{meta.label}</h3>
-                  <p className="mt-2 text-sm leading-relaxed text-gray-600">{line}</p>
-                  <div className="mt-4">
-                    <TextLink onClick={() => onPlan(type)}>Plan a {meta.label.toLowerCase()}</TextLink>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-
-        <div className="mt-12 grid gap-4 md:grid-cols-2">
-          {[
-            { b: 'Start from a sentence.', t: 'Type “a 120-guest wedding in Napa in June” and Evently fills in the details.', l: 'Try it now', g: 'from-fuchsia-500 to-indigo-600' },
-            { b: 'Bring your team.', t: 'Share the workflow so co-organizers can review what each agent found.', l: 'Invite organizers', g: 'from-amber-300 to-pink-500' },
-          ].map(({ b, t, l, g }) => (
-            <div key={b} className="relative overflow-hidden rounded-[32px] bg-gray-50 p-8 ring-1 ring-gray-900/5">
-              <div className={`absolute -right-10 -bottom-16 size-56 rotate-12 rounded-[48px] bg-gradient-to-br opacity-90 ${g}`} />
-              <p className="relative max-w-sm leading-relaxed">
-                <b className="font-semibold">{b}</b> <span className="text-gray-500">{t}</span>
-              </p>
-              <div className="relative mt-4">
-                <TextLink onClick={onStart}>{l}</TextLink>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  )
-}
-
-// A tilted ring around a use-case object. Drawn in two halves so the object sits inside it:
-// the back arc goes under the object, the front arc over it.
-function Orbit({ half }: { half: 'back' | 'front' }) {
-  const id = `orbit-${half}`
-  const arc = half === 'back' ? 'M8 30 A92 20 0 0 1 192 30' : 'M8 30 A92 20 0 0 0 192 30'
-  return (
-    <svg
-      aria-hidden
-      viewBox="0 0 200 60"
-      className={`pointer-events-none absolute inset-x-3 top-[60%] -translate-y-1/2 -rotate-12 overflow-visible ${half === 'front' ? 'z-10' : ''}`}
-    >
-      <defs>
-        <linearGradient id={id} x1="0" x2="1">
-          <stop offset="0" stopColor="#fff" stopOpacity="0" />
-          <stop offset="0.5" stopColor="#fff" stopOpacity={half === 'front' ? 0.95 : 0.55} />
-          <stop offset="1" stopColor="#fff" stopOpacity="0" />
-        </linearGradient>
-        <filter id={`${id}-glow`} x="-10%" y="-50%" width="120%" height="200%">
-          <feGaussianBlur stdDeviation="2.5" />
-        </filter>
-      </defs>
-      <g fill="none" stroke={`url(#${id})`} strokeLinecap="round">
-        <path d={arc} strokeWidth="5" filter={`url(#${id}-glow)`} />
-        <path d={arc} strokeWidth="2" />
-      </g>
-    </svg>
-  )
-}
-
-// Soft white curves across a use-case card's background.
-function Swooshes() {
-  return (
-    <svg aria-hidden viewBox="0 0 300 440" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 size-full">
-      <path d="M-20 250 C 70 190 190 300 320 170 L320 440 L-20 440 Z" fill="#fff" opacity="0.28" />
-      <path d="M-20 330 C 110 270 210 370 320 290 L320 440 L-20 440 Z" fill="#fff" opacity="0.3" />
-      <path d="M-20 110 C 60 50 200 150 320 30" fill="none" stroke="#fff" strokeOpacity="0.45" strokeWidth="1.2" />
-      <path d="M-20 175 C 90 120 180 210 320 110" fill="none" stroke="#fff" strokeOpacity="0.25" strokeWidth="1" />
-    </svg>
-  )
-}
-
-function HowItWorks() {
-  const how = [
-    { icon: MessageSquare, title: 'Tell Evently about your event.', body: 'Pick a type or describe it in a sentence. You get a full workflow in seconds.' },
-    { icon: Workflow, title: 'Shape the workflow.', body: 'Add, remove or reorder steps by chatting. The flowchart updates as you go.' },
-    { icon: Bot, title: 'Let the agents run.', body: 'Each step gets an agent that researches, drafts and reports back for your approval.' },
-  ]
-  return (
-    <section id="how" className="relative overflow-hidden bg-[#0f1033] py-28 text-white">
-      <div aria-hidden className="pointer-events-none absolute top-0 -left-40 h-[500px] w-[900px] rounded-full bg-[conic-gradient(from_0deg,#6366f1,#ec4899,#8b5cf6,#38bdf8,#6366f1)] opacity-20 blur-3xl" />
-      <div className="relative mx-auto max-w-7xl px-6">
-        <Heading dark lead="How it works." rest="Three steps from blank page to booked." className="max-w-3xl" />
-        <div className="mt-14 grid gap-6 md:grid-cols-3">
-          {how.map(({ icon: Icon, title, body }, i) => (
-            <div key={title} className="rounded-[32px] bg-white/5 p-7 ring-1 ring-white/10">
-              <div className="mb-6 flex items-center gap-3">
-                <span className="grid size-11 place-items-center rounded-full bg-indigo-500/20 text-indigo-300 ring-1 ring-indigo-400/30">
-                  <Icon size={18} />
-                </span>
-                <span className="font-mono text-xs text-indigo-300/70">0{i + 1}</span>
-              </div>
-              <p className="leading-relaxed">
-                <b className="font-semibold">{title}</b> <span className="text-indigo-100/60">{body}</span>
-              </p>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-6 overflow-x-auto rounded-[32px] bg-black/30 p-6 font-mono text-xs leading-6 whitespace-pre ring-1 ring-white/10">
-          <div className="text-indigo-300">› evently run hackathon --people 200 --city Austin</div>
-          <div className="text-white/50">  ✓ Venue Scout      3 venues match · 24h access · Wi-Fi</div>
-          <div className="text-white/50">  ✓ Sponsor Hunter   12 companies shortlisted · drafts ready</div>
-          <div className="text-white/50">  ◌ Caterer          requesting quotes near The Foundry…</div>
-          <div className="text-white/50">  · Scheduler        waiting on Location, Judges</div>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function FinalCta({ onStart, onSignIn }: Props & { onSignIn: () => void }) {
-  return (
-    <section className="bg-gray-50/70 py-24">
-      <div className="mx-auto grid max-w-7xl gap-12 px-6 lg:grid-cols-[1.4fr_1fr_1fr]">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Ready to plan your next event?</h2>
-          <p className="mt-4 max-w-md text-lg text-gray-500">Create an account in seconds and get your first workflow before your coffee cools.</p>
-          <div className="mt-8 flex flex-wrap gap-3">
-            <PrimaryButton onClick={onStart}>Start now</PrimaryButton>
-            <SecondaryButton onClick={onSignIn}>Sign in</SecondaryButton>
-          </div>
-        </div>
-        <div>
-          <span className="mb-4 grid size-11 place-items-center rounded-full bg-accent-soft text-accent">
-            <Workflow size={18} />
-          </span>
-          <h3 className="font-semibold">Templates included</h3>
-          <p className="mt-1 text-gray-500">Business, conference, hackathon, wedding and reunion workflows out of the box.</p>
-          <div className="mt-3">
-            <TextLink onClick={onStart}>Browse templates</TextLink>
-          </div>
-        </div>
-        <div>
-          <span className="mb-4 grid size-11 place-items-center rounded-full bg-accent-soft text-accent">
-            <GoogleG />
-          </span>
-          <h3 className="font-semibold">Works with Google</h3>
-          <p className="mt-1 text-gray-500">Maps, Gmail, Calendar, Contacts and Slides — connected with one sign-in.</p>
-          <div className="mt-3">
-            <TextLink onClick={onStart}>Connect account</TextLink>
-          </div>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-type FooterLink = { label: string } & ({ href: string } | { onClick: () => void })
-
-function Footer({ onPlan }: Pick<PlanProps, 'onPlan'>) {
-  const plan = (type: EventType, label: string): FooterLink => ({ label, onClick: () => onPlan(type) })
-  const cols: Record<string, FooterLink[]> = {
-    Product: [
-      { label: 'Workflows', href: '#features' },
-      { label: 'Agents', href: '#how' },
-      { label: 'Integrations', href: '#integrations' },
-      { label: 'Live slides', href: '#features' },
-    ],
-    'Use cases': [
-      plan('hackathon', 'Hackathons'),
-      plan('conference', 'Conferences'),
-      plan('wedding', 'Weddings'),
-      plan('business', 'Business events'),
-      plan('reunion', 'Reunions'),
-    ],
-    Resources: [
-      { label: 'Templates', href: '#use-cases' },
-      { label: 'GitHub', href: REPO },
-      { label: 'Report an issue', href: `${REPO}/issues` },
-    ],
-  }
-  return (
-    <footer className="border-t border-gray-900/5 bg-white">
-      <div className="mx-auto max-w-7xl px-6 py-20">
-        <div className="grid gap-12 md:grid-cols-[1.5fr_repeat(3,1fr)]">
-          <div>
-            <Logo />
-            <p className="mt-4 max-w-xs text-sm text-gray-500">AI agents that plan, coordinate and streamline your events.</p>
-            <form onSubmit={(e) => e.preventDefault()} className="mt-6 flex max-w-sm gap-2 rounded-full bg-gray-50 p-1.5 ring-1 ring-gray-900/10 focus-within:ring-2 focus-within:ring-accent">
-              <input type="email" placeholder="Enter your email" className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none" />
-              <button className="inline-flex items-center gap-1 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white">
-                Subscribe <ArrowRight size={14} />
-              </button>
-            </form>
-          </div>
-          {Object.entries(cols).map(([h, links]) => (
-            <div key={h}>
-              <h4 className="text-sm font-semibold">{h}</h4>
-              <ul className="mt-4 space-y-2.5 text-sm text-gray-500">
-                {links.map((l) => (
-                  <li key={l.label}>
-                    {'href' in l ? (
-                      <a
-                        href={l.href}
-                        className="hover:text-accent"
-                        {...(l.href.startsWith('http') && { target: '_blank', rel: 'noreferrer' })}
-                      >
-                        {l.label}
-                      </a>
-                    ) : (
-                      <button onClick={l.onClick} className="hover:text-accent">
-                        {l.label}
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-        <div className="mt-16 flex items-center justify-between border-t border-gray-900/5 pt-8 text-sm text-gray-400">
-          <span>© {YEAR} Evently</span>
-          <span className="flex items-center gap-1.5">
-            <Globe size={14} /> English
-          </span>
-        </div>
-      </div>
-    </footer>
   )
 }
