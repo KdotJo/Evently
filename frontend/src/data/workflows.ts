@@ -31,8 +31,8 @@ const WORKFLOWS: Record<EventType, TaskSeed[]> = {
   hackathon: [
     t('brief', 'Event brief', 'Planner', 'web', 'Theme, dates, headcount and budget envelope.'),
     t('venue', 'Location', 'Venue Scout', 'google-maps', 'Find venues that host hackathons with 24h access, Wi-Fi and breakout rooms.', ['brief']),
-    t('sponsors', 'Sponsors', 'Sponsor Hunter', 'web', 'Shortlist dev-tool & API companies that sponsor hackathons, draft outreach.', ['brief']),
-    t('registration', 'Registration', 'Registrar', 'web', 'Set up sign-up form, waitlist and team matching.', ['brief']),
+    t('sponsors', 'Sponsors', 'Sponsor Hunter', 'linkedin', 'Shortlist dev-tool & API companies that sponsor hackathons, find the right contact, draft outreach.', ['brief']),
+    t('registration', 'Registration', 'Registrar', 'luma', 'Set up the Luma event page, sign-up questions, waitlist and team matching.', ['brief']),
     t('catering', 'Catering', 'Caterer', 'google-maps', 'Quote meals + midnight snacks for the headcount near the venue.', ['venue']),
     t('av', 'Wi-Fi & AV', 'Tech Ops', 'web', 'Bandwidth estimate, power strips, projector and mic for demos.', ['venue']),
     t('prizes', 'Prizes', 'Prize Designer', 'web', 'Prize tracks and pool funded by sponsor tiers.', ['sponsors']),
@@ -54,9 +54,9 @@ const WORKFLOWS: Record<EventType, TaskSeed[]> = {
   conference: [
     t('brief', 'Event brief', 'Planner', 'web', 'Tracks, dates, expected attendance, budget.'),
     t('venue', 'Location', 'Venue Scout', 'google-maps', 'Convention centers / hotels with multiple halls.', ['brief']),
-    t('speakers', 'Speakers', 'Speaker Scout', 'web', 'Shortlist speakers by track, draft invitations.', ['brief']),
-    t('sponsors', 'Sponsors', 'Sponsor Hunter', 'web', 'Sponsor tiers and booth layout.', ['brief']),
-    t('ticketing', 'Ticketing', 'Registrar', 'web', 'Ticket tiers, promo codes, check-in.', ['venue']),
+    t('speakers', 'Speakers', 'Speaker Scout', 'linkedin', 'Shortlist speakers by track from their profiles, draft invitations.', ['brief']),
+    t('sponsors', 'Sponsors', 'Sponsor Hunter', 'linkedin', 'Find sponsor contacts, sponsor tiers and booth layout.', ['brief']),
+    t('ticketing', 'Ticketing', 'Registrar', 'luma', 'Luma ticket tiers, promo codes and check-in.', ['venue']),
     t('hotels', 'Hotel blocks', 'Travel Agent', 'google-maps', 'Room blocks near the venue for speakers + attendees.', ['venue']),
     t('catering', 'Catering', 'Caterer', 'google-maps', 'Breakfast, lunch and coffee breaks per day.', ['venue']),
     t('agenda', 'Agenda', 'Scheduler', 'google-calendar', 'Multi-track schedule, room assignments.', ['speakers', 'venue']),
@@ -95,10 +95,12 @@ export const INTEGRATION_LABEL: Record<Integration, string> = {
   'google-contacts': 'Google Contacts',
   'google-slides': 'Google Slides',
   'live-slides': 'Live slides',
+  linkedin: 'LinkedIn',
+  luma: 'Luma',
   web: 'Web search',
 }
 
-export const needsGoogle = (i: Integration) => i !== 'web' && i !== 'live-slides'
+export const needsGoogle = (i: Integration) => i.startsWith('google-') || i === 'gmail'
 
 // Every agent used across the workflows, with the integration it works through and one example job.
 export const AGENTS: { name: string; integration: Integration; example: string }[] = [

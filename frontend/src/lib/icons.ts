@@ -1,6 +1,6 @@
 import {
   Archive, Bot, Building, Calendar, CalendarClock, ClipboardCheck, ClipboardList, Clapperboard, Contact, Globe, Handshake,
-  Hotel, ListChecks, Mail, MapPin, Mic, Presentation, QrCode, Send, Store, Trophy, UserPlus, UserSearch, Users, UtensilsCrossed, Wifi,
+  Hotel, ListChecks, Mail, MapPin, Mic, Network, Presentation, QrCode, Send, Ticket, Store, Trophy, UserPlus, UserSearch, Users, UtensilsCrossed, Wifi,
   type LucideIcon,
 } from 'lucide-react'
 import calendarLogo from '../assets/google/calendar.png'
@@ -8,16 +8,20 @@ import contactsLogo from '../assets/google/contacts.png'
 import gmailLogo from '../assets/google/gmail.png'
 import mapsLogo from '../assets/google/maps.png'
 import slidesLogo from '../assets/google/slides.png'
+import linkedinLogo from '../assets/brands/linkedin.svg'
+import lumaLogo from '../assets/brands/luma.png'
 import type { Integration } from '../types'
 
-// Google's own product logos (from gstatic.com), for anywhere a service is named.
-// Web search isn't a Google product, so it has no logo and uses the globe icon.
+// Each service's own logo, for anywhere it's named: Google's from gstatic.com, Luma's app icon from
+// luma.com, and a LinkedIn "in" mark drawn to match theirs. Web search has no logo and uses the globe icon.
 export const INTEGRATION_LOGO: Partial<Record<Integration, string>> = {
   'google-maps': mapsLogo,
   gmail: gmailLogo,
   'google-calendar': calendarLogo,
   'google-contacts': contactsLogo,
   'google-slides': slidesLogo,
+  linkedin: linkedinLogo,
+  luma: lumaLogo,
 }
 
 export const INTEGRATION_ICON: Record<Integration, LucideIcon> = {
@@ -27,6 +31,8 @@ export const INTEGRATION_ICON: Record<Integration, LucideIcon> = {
   'google-contacts': Contact,
   'google-slides': Presentation,
   'live-slides': QrCode,
+  linkedin: Network,
+  luma: Ticket,
   web: Globe,
 }
 

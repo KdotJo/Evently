@@ -210,7 +210,7 @@ export default function Landing({ onPick, onResume, onHome, user, onSignOut }: P
                   icon={INTEGRATION_ICON[i]}
                   logo={INTEGRATION_LOGO[i]}
                   title={INTEGRATION_LABEL[i]}
-                  meta={i === 'web' ? 'Always on' : 'Needs Google'}
+                  meta={i === 'web' ? 'Always on' : i === 'live-slides' ? 'Built in' : i === 'linkedin' ? 'No sign-in needed yet' : i === 'luma' ? 'Publishes only after you confirm' : 'Needs Google'}
                   body={`Used by ${AGENTS.filter((a) => a.integration === i).map((a) => a.name).join(', ') || 'no agents yet'}.`}
                 />
               ))}

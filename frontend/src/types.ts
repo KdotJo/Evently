@@ -8,6 +8,10 @@ export type Integration =
   | 'google-slides'
   // Evently's own presenter view with an audience QR code; needs no Google account.
   | 'live-slides'
+  // People and company search for speakers and sponsors. No sign-in flow yet.
+  | 'linkedin'
+  // Event pages, registration and guest invites (backend: app/integrations/luma.py). Publishing needs the user's OK.
+  | 'luma'
   | 'web'
 
 export type TaskStatus = 'idle' | 'queued' | 'running' | 'done' | 'blocked' | 'error'

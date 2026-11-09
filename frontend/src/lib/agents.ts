@@ -144,9 +144,15 @@ function byTask(task: Task, ev: EventDetails): TaskResult[] | null {
       ])
     case 'registration':
       return simple([
+        ['Luma event page', 'Free · on Luma', 'Sign-ups, waitlist and reminder emails on Luma. Guests sync back into the plan.', ['Draft the event page from the plan', 'Add team-matching questions', `Set a waitlist at ${n}`, 'Publish the event page']],
         ['Evently registration form', 'Free · built-in', 'Feeds headcount and dietary info into the other agents.', ['Publish the form', 'Add team-matching questions', `Set a waitlist at ${n}`]],
         ['Paid ticket page', '$10 refundable deposit', 'Cuts no-shows, typically by 30–40%.', ['Set the refund policy', 'Connect payouts']],
         ['Invite-only list', 'Application review', 'Best when demand far exceeds capacity.', ['Write the application questions', 'Schedule review sessions']],
+      ])
+    case 'ticketing':
+      return simple([
+        ['Luma ticketed event', 'Paid tiers on Luma', 'Early-bird, regular and speaker tickets, with QR check-in at the door.', ['Draft the event page from the plan', 'Set ticket tiers and prices', 'Create speaker and sponsor promo codes', 'Publish the event page']],
+        ['Luma free registration', 'Approval required', 'Free tickets with a manual review, when the room is small.', ['Draft the event page from the plan', 'Write the approval questions', 'Publish the event page']],
       ])
     case 'av':
       return simple([

@@ -8,6 +8,8 @@ import type { EventDetails, Task, TaskResult } from '../types'
 // as `{ index, status, note }`. The agent must report every item it finishes with status 'done'
 // and a short note saying what it did ("Email sent to dana@…"), and report 'needs-you' for any
 // item only a person can do (printing, rehearsing, signing) instead of skipping it silently.
+// Anything that goes public (publishing the Luma event page) must come back as 'needs-you': the
+// user ticking it is the confirmation, and only then should the frontend call the publish endpoint.
 
 export type TodoStatus = 'pending' | 'working' | 'done' | 'needs-you'
 
@@ -30,6 +32,8 @@ const HUMAN = /\b(print|rehearse|test the|walk-through|tasting|tour|visit|sign|p
 
 function noteFor(task: Task, item: string): TodoProgress {
   if (HUMAN.test(item)) return { status: 'needs-you', note: 'An agent can’t do this one. Tick it when it’s done.' }
+  // Anything public (a Luma page, a form) only goes live once the user confirms.
+  if (/^publish\b/i.test(item)) return { status: 'needs-you', note: 'Ready to go live. Tick it to confirm and publish.' }
   const verb = item.toLowerCase()
   const note = /^(send|email|invite|share|ask|request|reach out)/.test(verb)
     ? `Sent by the ${task.agent} agent. Replies will show up here.`

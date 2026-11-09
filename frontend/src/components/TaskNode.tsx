@@ -1,5 +1,5 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
-import { AlertTriangle, Calendar, Check, ChevronRight, Contact, Globe, Loader2, Lock, Mail, MapPin, Presentation, QrCode, Unlink } from 'lucide-react'
+import { AlertTriangle, Calendar, Check, ChevronRight, Contact, Globe, Loader2, Lock, Mail, MapPin, Network, Presentation, QrCode, Ticket, Unlink } from 'lucide-react'
 import { INTEGRATION_LABEL, needsGoogle } from '../data/workflows'
 import { NODE_H, NODE_W } from '../lib/layout'
 import type { Integration, Task } from '../types'
@@ -18,6 +18,8 @@ const ICON: Record<Integration, typeof Globe> = {
   'google-contacts': Contact,
   'google-slides': Presentation,
   'live-slides': QrCode,
+  linkedin: Network,
+  luma: Ticket,
   web: Globe,
 }
 
