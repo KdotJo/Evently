@@ -17,7 +17,14 @@ version: '3'
 silent: false
 dotenv: ['.env']
 
+# Container engine: podman (default) or docker. Override per call (`task ENGINE=docker …`) or `export ENGINE=docker`.
+# With podman, kind is told to use it (KIND_EXPERIMENTAL_PROVIDER) and compose runs as `podman compose`.
+env:
+  KIND_EXPERIMENTAL_PROVIDER: '{{if eq .ENGINE "podman"}}podman{{end}}'
+
 vars:
+  ENGINE: '{{.ENGINE | default "podman"}}'
+  COMPOSE: '{{.ENGINE | default "podman"}} compose'
   # --- naming (the manifests under deploy/k8s hard-code namespace `evently`) -------------------
   NAMESPACE: evently
   CLUSTER: evently
@@ -70,17 +77,21 @@ tasks:
         fi
 
   tools:install:
-    desc: brew install go-task kind helm (Docker Desktop or OrbStack are installed by hand)
+    desc: brew install go-task kind helm podman podman-compose, then create a rootful podman machine
     preconditions:
       - sh: command -v brew >/dev/null 2>&1
         msg: "Homebrew not found. Install it from https://brew.sh first."
     cmds:
-      - brew install go-task kind helm
+      - brew install go-task kind helm podman podman-compose
+      - |
+        if ! podman machine list --format '{{"{{"}}.Name{{"}}"}}' 2>/dev/null | grep -q .; then
+          podman machine init --cpus 4 --memory 8192 --disk-size 60 --rootful
+        fi
+        podman machine start 2>/dev/null || true
+        echo "Podman machine ready. Using Docker instead? Run tasks with ENGINE=docker."
       - |
         echo ""
-        echo "Not installed by this task: a container runtime (needed by kind, compose and docker:*)."
-        echo "  Docker Desktop:  brew install --cask docker"
-        echo "  OrbStack:        brew install --cask orbstack   (lighter, recommended on Apple silicon)"
+        echo "Container engine: Podman (installed above). To use Docker Desktop / OrbStack instead, run tasks with ENGINE=docker."
         echo "Optional: Radar UI (brew install kubectl-radar), sonar-scanner (brew install sonar-scanner)."
         echo "kubectl is already installed. Run 'task tools:check' to verify everything."
 
@@ -89,7 +100,7 @@ tasks:
     cmds:
       - |
         missing=0
-        for t in docker kind kubectl helm task radar; do
+        for t in {{.ENGINE}} kind kubectl helm task radar; do
           case "$t" in
             docker)  hint='Docker Desktop (brew install --cask docker) or OrbStack (brew install --cask orbstack)' ;;
             kind)    hint='brew install kind' ;;
@@ -110,8 +121,8 @@ tasks:
             missing=$((missing + 1))
           fi
         done
-        if command -v docker >/dev/null 2>&1 && ! docker info >/dev/null 2>&1; then
-          echo "  docker   installed, but the daemon is not running: start Docker Desktop / OrbStack"
+        if command -v {{.ENGINE}} >/dev/null 2>&1 && ! {{.ENGINE}} info >/dev/null 2>&1; then
+          echo "  {{.ENGINE}}   installed, but not running: \`podman machine start\` (or start Docker Desktop with ENGINE=docker)"
         fi
         echo ""
         echo "$missing tool(s) missing."
@@ -192,12 +203,12 @@ tasks:
   compose:up:
     desc: Build and start the whole stack in the background (API on :8000)
     preconditions: &docker_ready
-      - sh: command -v docker >/dev/null 2>&1
-        msg: "docker not found. Install Docker Desktop or OrbStack (see: task tools:install)."
-      - sh: docker info >/dev/null 2>&1
-        msg: "The Docker daemon is not running. Start Docker Desktop / OrbStack and retry."
+      - sh: command -v {{.ENGINE}} >/dev/null 2>&1
+        msg: "{{.ENGINE}} not found. Run: task tools:install (Podman), or use ENGINE=docker with Docker Desktop / OrbStack."
+      - sh: '{{.ENGINE}} info >/dev/null 2>&1'
+        msg: "{{.ENGINE}} is not running. Run `podman machine start` (or start Docker Desktop with ENGINE=docker) and retry."
     cmds:
-      - docker compose up --build --detach
+      - '{{.COMPOSE}} up --build --detach'
       - |
         echo ""
         echo "API: http://localhost:8000  (docs: /docs)   Logs: task compose:logs   Stop: task compose:down"
@@ -207,38 +218,38 @@ tasks:
     desc: Same as compose:up plus Kibana (profile "tools") on http://localhost:5601
     preconditions: *docker_ready
     cmds:
-      - docker compose --profile tools up --build --detach
+      - '{{.COMPOSE}} --profile tools up --build --detach'
 
   compose:down:
     desc: Stop and remove the stack's containers (data volumes are kept)
     preconditions: *docker_ready
     cmds:
-      - docker compose --profile tools down
+      - '{{.COMPOSE}} --profile tools down'
 
   compose:down:volumes:
     desc: Stop the stack AND delete its volumes (Postgres and Elasticsearch data)
     prompt: This deletes the postgres-data and es-data volumes. Continue?
     preconditions: *docker_ready
     cmds:
-      - docker compose --profile tools down --volumes
+      - '{{.COMPOSE}} --profile tools down --volumes'
 
   compose:logs:
     desc: "Follow stack logs (all services, or one: task compose:logs SERVICE=api)"
     preconditions: *docker_ready
     cmds:
-      - docker compose logs --follow --tail=200 {{.SERVICE}}
+      - '{{.COMPOSE}} logs --follow --tail=200 {{.SERVICE}}'
 
   compose:ps:
     desc: Show the status of the stack's containers
     preconditions: *docker_ready
     cmds:
-      - docker compose --profile tools ps
+      - '{{.COMPOSE}} --profile tools ps'
 
   compose:build:
     desc: Build the API image through compose (tag evently-api:dev)
     preconditions: *docker_ready
     cmds:
-      - docker compose build
+      - '{{.COMPOSE}} build'
 
   # =============================================================================================
   # Single container
@@ -248,21 +259,21 @@ tasks:
     desc: Build the API image (IMAGE, default evently-api:dev)
     preconditions: *docker_ready
     cmds:
-      - docker build --tag {{.IMAGE}} .
+      - '{{.ENGINE}} build --tag {{.IMAGE}} .'
 
   docker:run:
     desc: Run the API image on http://localhost:8000 with .env (SQLite in a named volume)
     preconditions:
-      - sh: command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1
+      - sh: command -v {{.ENGINE}} >/dev/null 2>&1 && {{.ENGINE}} info >/dev/null 2>&1
         msg: "Docker is not installed or its daemon is not running (see: task tools:check)."
       - sh: test -f .env
         msg: ".env not found. Run: task setup"
-      - sh: docker image inspect {{.IMAGE}} >/dev/null 2>&1
+      - sh: '{{.ENGINE}} image inspect {{.IMAGE}} >/dev/null 2>&1'
         msg: "Image {{.IMAGE}} not found. Run: task docker:build"
     cmds:
       # DATABASE_URL is forced to the container's /data volume: the .env value (./evently.db) is a host path.
       - >-
-        docker run --rm --publish {{.PORT}}:8000 --env-file .env
+        {{.ENGINE}} run --rm --publish {{.PORT}}:8000 --env-file .env
         --env DATABASE_URL=sqlite+aiosqlite:////data/evently.db
         --volume evently-data:/data {{.IMAGE}}
 
@@ -290,7 +301,7 @@ tasks:
         msg: "kind not found. Run: task tools:install"
       - sh: command -v kubectl >/dev/null 2>&1
         msg: "kubectl not found. Run: brew install kubectl"
-      - sh: command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1
+      - sh: command -v {{.ENGINE}} >/dev/null 2>&1 && {{.ENGINE}} info >/dev/null 2>&1
         msg: "Docker is not installed or its daemon is not running. Start Docker Desktop / OrbStack."
     cmds:
       - |
@@ -340,12 +351,12 @@ tasks:
   k8s:image:load:
     desc: Build the API image (IMAGE) and load it into the kind cluster
     preconditions:
-      - sh: command -v kind >/dev/null 2>&1 && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1
-        msg: "kind or Docker missing, or the Docker daemon is not running (see: task tools:check)."
+      - sh: command -v kind >/dev/null 2>&1 && command -v {{.ENGINE}} >/dev/null 2>&1 && {{.ENGINE}} info >/dev/null 2>&1
+        msg: "kind or {{.ENGINE}} missing, or the engine is not running (see: task tools:check)."
       - sh: kind get clusters 2>/dev/null | grep -qx "{{.CLUSTER}}"
         msg: "kind cluster '{{.CLUSTER}}' not found. Run: task k8s:cluster:up"
     cmds:
-      - docker build --tag {{.IMAGE}} .
+      - '{{.ENGINE}} build --tag {{.IMAGE}} .'
       - kind load docker-image {{.IMAGE}} --name {{.CLUSTER}}
 
   k8s:render:

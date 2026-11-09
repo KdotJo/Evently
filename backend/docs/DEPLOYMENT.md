@@ -10,6 +10,15 @@ Observability (OpenTelemetry → Dash0) has its own guide: [OBSERVABILITY.md](OB
 
 ## Quick start with Task
 
+> **Container engine: Podman by default.** `task tools:install` installs go-task, kind, helm, podman and
+> podman-compose and creates a rootful Podman machine (4 CPUs / 8 GB; rootful so ingress-nginx can map
+> host ports 80/443). Every container task then runs through Podman: kind gets
+> `KIND_EXPERIMENTAL_PROVIDER=podman`, Compose runs as `podman compose`, images build with `podman build`.
+> Prefer Docker Desktop / OrbStack? Run tasks with `ENGINE=docker` (or `export ENGINE=docker`).
+> minikube (`--driver=podman`) and Podman Desktop's Kubernetes extension also work; only the
+> `k8s:cluster:*` tasks assume kind. CI still builds the image with Docker Buildx on GitHub runners —
+> the Dockerfile is engine-neutral.
+
 `Taskfile.yml` wraps everything below in single commands ([go-task](https://taskfile.dev), macOS +
 Homebrew). `task` with no arguments lists every task, each with a one-line description.
 

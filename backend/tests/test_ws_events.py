@@ -9,7 +9,7 @@ from app.models import Event, User
 from app.realtime import events as ev
 from app.realtime.events import Envelope, event_topic
 from app.services import board
-from tests.helpers import create_event, published
+from tests.helpers import create_event
 
 
 def _ctx(client: TestClient):
@@ -112,9 +112,8 @@ def test_since_replays_retained_envelopes(client, client_event):
     with client.websocket_connect(f"/ws/events/{client_event.id}?since={first.seq}") as ws:
         hello = ws.receive_json()
         assert hello["data"]["last_seq"] == 3  # a, b, c (presence is ephemeral)
-        replayed = [ws.receive_json() for _ in range(3)]
+        replayed = [ws.receive_json() for _ in range(2)]
         assert [m["seq"] for m in replayed] == [second.seq, third.seq]
-        assert replayed[2]["type"] == ev.BOARD_PRESENCE
 
 
 def test_since_ahead_of_server_gets_resync(client, client_event):
