@@ -1,8 +1,8 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
-import { AlertTriangle, Check, ChevronUp, ExternalLink, Link2, Loader2, Mail, Phone, Plus, RotateCw, Star, Upload, Users, X } from 'lucide-react'
+import { AlertTriangle, Check, ChevronUp, Clock, ExternalLink, Link2, Loader2, Mail, Phone, Plus, RotateCw, Send, Star, Upload, Users, X } from 'lucide-react'
 import QRCode from 'qrcode'
 import { useEffect, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react'
-import { isDone, type TodoProgress } from '../lib/execute'
+import { isAwaiting, isDone, type TodoProgress } from '../lib/execute'
 import type { Field, FieldKey } from '../lib/options'
 import type { TaskResult } from '../types'
 
@@ -36,6 +36,8 @@ export interface ResultNodeData extends Record<string, unknown> {
   onOpen: () => void
   onDecide: (d: Decision) => void
   onToggleTodo: (i: number) => void
+  // Has the agent email the thread again after a question or a no.
+  onFollowUp: (i: number) => void
   onConnectGoogle: () => void
   onRetry: () => void
   onAdd: (values: Partial<Record<FieldKey, string>>) => void
@@ -58,7 +60,15 @@ const mapsUrl = (r: TaskResult, city: string) =>
 
 export default function ResultNode({ data }: NodeProps<ResultNodeType>) {
   const { item, size, expanded, onConnectGoogle } = data
-  const tone = item.kind === 'add' && !expanded ? 'bg-white/60 ring-transparent' : TONE[(item.kind === 'result' && item.decision) || 'none']
+  // An approved option whose agent is still working or waiting on a reply shares the in-progress gradient.
+  const inProgress =
+    item.kind === 'result' && item.decision === 'approved' && item.planApproved && data.progress.some((p) => p?.status === 'working' || isAwaiting(p))
+  const tone =
+    item.kind === 'add' && !expanded
+      ? 'bg-white/60 ring-transparent'
+      : inProgress && !expanded
+        ? 'node-running ring-indigo-300'
+        : TONE[(item.kind === 'result' && item.decision) || 'none']
   const clickable = item.kind === 'result' || (item.kind === 'add' && !expanded)
 
   return (
@@ -143,7 +153,8 @@ function Summary({ item, expanded, progress }: { item: Extract<ResultItem, { kin
   // Once agents act on this option, its pill tracks the checklist instead of the decision.
   const acting = decision === 'approved' && planApproved && todo.length > 0
   const working = acting && progress.some((p) => p?.status === 'working')
-  const needsYou = acting && !working && progress.some((p) => p?.status === 'needs-you')
+  const waiting = acting && !working ? progress.filter(isAwaiting).length : 0
+  const needsYou = acting && !working && !waiting && progress.some((p) => p?.status === 'needs-you')
   const badge = decision === 'approved' ? 'bg-emerald-500 text-white' : decision === 'ignored' ? 'bg-rose-500 text-white' : 'bg-accent text-white'
   return (
     <div className={`flex shrink-0 items-center gap-3 px-3.5 ${expanded ? 'border-b border-gray-900/5 py-3' : 'h-full'}`}>
@@ -176,9 +187,11 @@ function Summary({ item, expanded, progress }: { item: Extract<ResultItem, { kin
           className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${
             working
               ? 'bg-accent-soft text-accent ring-accent/30'
-              : needsYou
-                ? 'bg-amber-50 text-amber-700 ring-amber-300'
-                : decision === 'approved'
+              : waiting
+                ? 'bg-white/80 text-accent ring-accent/30'
+                : needsYou
+                  ? 'bg-amber-50 text-amber-700 ring-amber-300'
+                  : decision === 'approved'
               ? 'bg-emerald-100 text-emerald-700 ring-emerald-300'
               : decision === 'ignored'
                 ? 'bg-rose-100 text-rose-700 ring-rose-300'
@@ -186,12 +199,15 @@ function Summary({ item, expanded, progress }: { item: Extract<ResultItem, { kin
           }`}
         >
           {working && <Loader2 size={10} className="animate-spin" />}
+          {waiting > 0 && <Clock size={10} />}
           {acting
             ? working
               ? `Working ${done}/${todo.length}`
-              : needsYou
-                ? `Needs you · ${done}/${todo.length}`
-                : done === todo.length
+              : waiting
+                ? `Awaiting ${waiting === 1 ? 'reply' : `${waiting} replies`} · ${done}/${todo.length}`
+                : needsYou
+                  ? `Needs you · ${done}/${todo.length}`
+                  : done === todo.length
                   ? `Done ${done}/${todo.length}`
                   : `Approved · ${done}/${todo.length}`
             : decision === 'approved'
@@ -210,7 +226,7 @@ function Summary({ item, expanded, progress }: { item: Extract<ResultItem, { kin
 }
 
 function Details({ data, item }: { data: ResultNodeData; item: Extract<ResultItem, { kind: 'result' }> }) {
-  const { city, progress, onDecide, onToggleTodo } = data
+  const { city, progress, onDecide, onToggleTodo, onFollowUp } = data
   const r = item.result
   const todo = r.todo ?? []
   const done = todo.filter((_, i) => isDone(progress[i])).length
@@ -239,7 +255,7 @@ function Details({ data, item }: { data: ResultNodeData; item: Extract<ResultIte
           )}
           <ul className="space-y-2">
             {todo.map((t, i) => (
-              <TodoRow key={t} text={t} progress={progress[i]} onToggle={() => onToggleTodo(i)} />
+              <TodoRow key={t} text={t} progress={progress[i]} onToggle={() => onToggleTodo(i)} onFollowUp={() => onFollowUp(i)} />
             ))}
           </ul>
         </div>
@@ -426,38 +442,75 @@ function LivePanel({ live }: { live: LiveInfo }) {
 }
 
 // One checklist item. The agent ticks items as it finishes them; the user can tick any by hand.
-function TodoRow({ text, progress, onToggle }: { text: string; progress?: TodoProgress; onToggle: () => void }) {
+// Items sent by email stay open (in progress) until the thread gets a confirming reply.
+function TodoRow({ text, progress, onToggle, onFollowUp }: { text: string; progress?: TodoProgress; onToggle: () => void; onFollowUp: () => void }) {
   const status = progress?.status ?? 'pending'
   const done = status === 'done'
+  const thread = progress?.thread
   const box =
     status === 'working'
       ? 'bg-accent-soft text-accent ring-accent/40'
-      : done
-        ? progress?.by === 'agent'
-          ? 'bg-emerald-500 text-white ring-emerald-500'
-          : 'bg-accent text-white ring-accent'
-        : status === 'needs-you'
-          ? 'bg-amber-50 ring-amber-400'
-          : 'bg-white ring-gray-300'
+      : status === 'awaiting-reply'
+        ? 'bg-accent-soft text-accent ring-accent/40'
+        : done
+          ? progress?.by === 'agent'
+            ? 'bg-emerald-500 text-white ring-emerald-500'
+            : 'bg-accent text-white ring-accent'
+          : status === 'needs-you'
+            ? 'bg-amber-50 ring-amber-400'
+            : 'bg-white ring-gray-300'
+  const label = done ? 'done' : status === 'working' ? 'agent working' : status === 'awaiting-reply' ? 'awaiting reply' : status === 'needs-you' ? 'needs you' : 'not done'
   return (
     <li>
       <button
         onClick={onToggle}
         disabled={status === 'working'}
-        aria-label={`${text}: ${done ? 'done' : status === 'working' ? 'agent working' : status === 'needs-you' ? 'needs you' : 'not done'}`}
+        aria-label={`${text}: ${label}`}
         className="flex w-full items-start gap-2.5 text-left text-[13px] disabled:cursor-progress"
       >
         <span className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded-md ring-1 transition ${box}`}>
-          {status === 'working' ? <Loader2 size={10} className="animate-spin" /> : done && <Check size={10} strokeWidth={3} />}
+          {status === 'working' ? (
+            <Loader2 size={10} className="animate-spin" />
+          ) : status === 'awaiting-reply' ? (
+            <Clock size={10} />
+          ) : (
+            done && <Check size={10} strokeWidth={3} />
+          )}
         </span>
         <span className="min-w-0">
           <span className={done ? 'text-muted line-through' : ''}>{text}</span>
           {status === 'working' && <span className="block text-[11px] text-accent">Agent working on this…</span>}
+          {status === 'awaiting-reply' && (
+            <span className="block text-[11px] text-accent">
+              Awaiting reply · sent {ago(thread?.sentAt)}. {progress?.note}
+            </span>
+          )}
           {done && progress?.by === 'agent' && progress.note && <span className="block text-[11px] text-emerald-700">{progress.note}</span>}
           {done && progress?.by === 'you' && <span className="block text-[11px] text-muted">Ticked by you</span>}
           {status === 'needs-you' && <span className="block text-[11px] text-amber-700">Needs you. {progress?.note}</span>}
         </span>
       </button>
+      {thread?.reply && (
+        <blockquote
+          className={`mt-1.5 ml-6.5 rounded-lg px-2.5 py-1.5 text-[11px] leading-snug ring-1 ${
+            thread.reply.verdict === 'confirmed' ? 'bg-emerald-50 text-emerald-800 ring-emerald-200' : 'bg-amber-50 text-amber-800 ring-amber-200'
+          }`}
+        >
+          <span className="font-semibold">{thread.with}:</span> “{thread.reply.text}”
+        </blockquote>
+      )}
+      {status === 'needs-you' && thread && (
+        <button onClick={onFollowUp} className="mt-1.5 ml-6.5 inline-flex items-center gap-1 text-[11px] font-semibold text-accent hover:underline">
+          <Send size={11} /> Send a follow-up
+        </button>
+      )}
     </li>
   )
+}
+
+// "just now", "3 min ago", "2 h ago".
+function ago(at?: number) {
+  if (!at) return 'just now'
+  const min = Math.floor((Date.now() - at) / 60000)
+  return min < 1 ? 'just now' : min < 60 ? `${min} min ago` : `${Math.floor(min / 60)} h ago`
 }
