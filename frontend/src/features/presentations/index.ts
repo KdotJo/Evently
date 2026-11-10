@@ -5,7 +5,8 @@ import OpenDeckAction from './OpenDeckAction'
 import { runDeckTask } from './runner'
 
 // The integration covers every deck step; the task ids make the mapping explicit (ids win over integrations).
-for (const key of ['google-slides', 'presentation', 'slides', 'dayof', 'memories']) registerRunner(key, runDeckTask)
+// 'dayof' is a plain run-sheet step in the current workflows; decks belong to the `live-slides` steps.
+for (const key of ['google-slides', 'live-slides', 'presentation', 'slides', 'memories']) registerRunner(key, runDeckTask)
 
 registerResultAction({
   id: 'open-deck',

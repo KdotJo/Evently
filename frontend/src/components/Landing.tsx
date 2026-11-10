@@ -1,11 +1,12 @@
-import { ArrowRight, ArrowUp, Clock, Compass, Plus, Puzzle, Sparkles, Wrench, type LucideIcon } from 'lucide-react'
+import { ArrowRight, ArrowUp, Clock, Compass, LogOut, Plus, Puzzle, Sparkles, Wrench, type LucideIcon } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { serverTime } from '../features/chat/messages'
 import { useEventList } from '../features/events/api'
 import { AGENTS, EVENT_TYPES, INTEGRATION_LABEL } from '../data/workflows'
 import { INTEGRATION_ICON, INTEGRATION_LOGO, agentIcon } from '../lib/icons'
-import { loadRecent } from '../lib/recent'
+import type { User } from '../lib/auth'
+import { loadRecent, type RecentEvent } from '../lib/recent'
 import type { EventType, Integration } from '../types'
 
 type View = 'new' | 'tools' | 'plugins' | 'explore'
@@ -38,17 +39,22 @@ interface Props {
   /** The backend is reachable (and we're signed in): list saved events instead of this browser's history. */
   online?: boolean
   onPick: (type: EventType, note?: string) => void
+  onResume: (event: RecentEvent) => void
   onHome: () => void
+  user: User | null
+  onSignOut: () => void
 }
 
 const eventTypeOf = (req: Record<string, unknown>): EventType | undefined =>
   EVENT_TYPES.find((e) => e.id === req.event_type)?.id
 
-export default function Landing({ online = false, onPick, onHome }: Props) {
+export default function Landing({ online = false, onPick, onResume, onHome, user, onSignOut }: Props) {
   const [draft, setDraft] = useState('')
   const [view, setView] = useState<View>('new')
   const [recent] = useState(loadRecent)
   const saved = useEventList(online)
+  // Online, a plan saved as a backend event is listed once, as that event (the server copy is the real one).
+  const localOnly = online ? recent.filter((r) => !r.eventId) : recent
   const emoji = (t: EventType) => EVENT_TYPES.find((e) => e.id === t)!.emoji
   const label = (t: EventType) => EVENT_TYPES.find((e) => e.id === t)!.label
   const rowClass =
@@ -90,41 +96,51 @@ export default function Landing({ online = false, onPick, onHome }: Props) {
             <Clock size={12} /> Recent Events
           </div>
           <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
-            {online ? (
-              saved === null ? (
-                <p className="px-3 py-2 text-sm text-muted">Loading…</p>
-              ) : saved.length ? (
-                saved.map((ev) => {
-                  const type = eventTypeOf(ev.requirements)
-                  return (
-                    <Link key={ev.id} to={`/events/${encodeURIComponent(ev.id)}`} title={ev.description || ev.name} className={rowClass}>
-                      <span>{type ? emoji(type) : '📅'}</span>
-                      <span className="min-w-0 flex-1 truncate">{ev.name}</span>
-                      <span className="shrink-0 text-[11px] text-muted">{ago(serverTime(ev.updated_at))}</span>
-                    </Link>
-                  )
-                })
-              ) : (
-                <p className="px-3 py-2 text-sm text-muted">Events you start show up here.</p>
-              )
-            ) : recent.length ? (
-              recent.map((r) => (
-                <button
-                  key={r.at}
-                  onClick={() => onPick(r.type, r.note)}
-                  title={r.note ?? label(r.type)}
-                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 hover:text-ink"
-                >
-                  <span>{emoji(r.type)}</span>
-                  <span className="min-w-0 flex-1 truncate">{r.note ?? label(r.type)}</span>
-                  <span className="shrink-0 text-[11px] text-muted">{ago(r.at)}</span>
-                </button>
-              ))
-            ) : (
+            {/* Online: the account's saved events first, then plans only this browser has (e.g. made offline). */}
+            {online && saved === null && <p className="px-3 py-2 text-sm text-muted">Loading…</p>}
+            {online &&
+              saved?.map((ev) => {
+                const type = eventTypeOf(ev.requirements)
+                return (
+                  <Link key={ev.id} to={`/events/${encodeURIComponent(ev.id)}`} title={ev.description || ev.name} className={rowClass}>
+                    <span>{type ? emoji(type) : '📅'}</span>
+                    <span className="min-w-0 flex-1 truncate">{ev.name}</span>
+                    <span className="shrink-0 text-[11px] text-muted">{ago(serverTime(ev.updated_at))}</span>
+                  </Link>
+                )
+              })}
+            {localOnly.map((r) => (
+              <button key={r.id} onClick={() => onResume(r)} title={r.note ?? label(r.type)} className={rowClass}>
+                <span>{emoji(r.type)}</span>
+                <span className="min-w-0 flex-1 truncate">{r.note ?? label(r.type)}</span>
+                <span className="shrink-0 text-[11px] text-muted">{ago(r.at)}</span>
+              </button>
+            ))}
+            {!(online && saved === null) && !saved?.length && !localOnly.length && (
               <p className="px-3 py-2 text-sm text-muted">Events you start show up here.</p>
             )}
           </div>
         </div>
+
+        {user && (
+          <div className="mt-3 flex items-center gap-2.5 border-t border-line px-2 pt-3">
+            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-bold text-accent">
+              {user.name
+                .split(' ')
+                .map((w) => w[0])
+                .slice(0, 2)
+                .join('')
+                .toUpperCase()}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold">{user.name}</div>
+              <div className="truncate text-xs text-muted">{user.email}</div>
+            </div>
+            <button onClick={onSignOut} title="Sign out" aria-label="Sign out" className="rounded-lg p-1.5 text-muted hover:bg-gray-100 hover:text-ink">
+              <LogOut size={15} />
+            </button>
+          </div>
+        )}
       </aside>
 
       {/* .glow clips its blurred backdrop with overflow: hidden, so scrolling lives on the inner div. */}
@@ -214,7 +230,7 @@ export default function Landing({ online = false, onPick, onHome }: Props) {
                   icon={INTEGRATION_ICON[i]}
                   logo={INTEGRATION_LOGO[i]}
                   title={INTEGRATION_LABEL[i]}
-                  meta={i === 'web' ? 'Always on' : 'Needs Google'}
+                  meta={i === 'web' ? 'Always on' : i === 'live-slides' ? 'Built in' : i === 'linkedin' ? 'No sign-in needed yet' : i === 'luma' ? 'Publishes only after you confirm' : 'Needs Google'}
                   body={`Used by ${AGENTS.filter((a) => a.integration === i).map((a) => a.name).join(', ') || 'no agents yet'}.`}
                 />
               ))}

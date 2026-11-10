@@ -1,3 +1,5 @@
+import type { SavedPlan } from './lib/recent'
+
 export type EventType = 'business' | 'conference' | 'hackathon' | 'wedding' | 'reunion'
 
 export type Integration =
@@ -6,6 +8,12 @@ export type Integration =
   | 'google-calendar'
   | 'google-contacts'
   | 'google-slides'
+  // Evently's own presenter view with an audience QR code; needs no Google account.
+  | 'live-slides'
+  // People and company search for speakers and sponsors. No sign-in flow yet.
+  | 'linkedin'
+  // Event pages, registration and guest invites (backend: app/integrations/luma.py). Publishing needs the user's OK.
+  | 'luma'
   | 'web'
 
 export type TaskStatus = 'idle' | 'queued' | 'running' | 'done' | 'blocked' | 'error'
@@ -51,6 +59,8 @@ export interface Task {
   // Set when the agent run failed.
   error?: string
   results?: TaskResult[]
+  // Results copied from a community plan. Kept when the plan runs, so agents only fill the open steps.
+  shared?: boolean
 }
 
 export interface EventDetails {
@@ -65,3 +75,7 @@ export interface ChatMessage {
   role: 'assistant' | 'user'
   text: string
 }
+
+// How the marketing pages start a plan: a type with an optional template (a prompt for the intake
+// and steps to drop), or a copy of someone's filled-out plan that opens straight on the node map.
+export type PlanStart = { type: EventType; note?: string; skip?: string[] } | { copy: SavedPlan; note: string }

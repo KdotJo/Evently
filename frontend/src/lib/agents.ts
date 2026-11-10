@@ -144,9 +144,15 @@ function byTask(task: Task, ev: EventDetails): TaskResult[] | null {
       ])
     case 'registration':
       return simple([
+        ['Luma event page', 'Free · on Luma', 'Sign-ups, waitlist and reminder emails on Luma. Guests sync back into the plan.', ['Draft the event page from the plan', 'Add team-matching questions', `Set a waitlist at ${n}`, 'Publish the event page']],
         ['Evently registration form', 'Free · built-in', 'Feeds headcount and dietary info into the other agents.', ['Publish the form', 'Add team-matching questions', `Set a waitlist at ${n}`]],
         ['Paid ticket page', '$10 refundable deposit', 'Cuts no-shows, typically by 30–40%.', ['Set the refund policy', 'Connect payouts']],
         ['Invite-only list', 'Application review', 'Best when demand far exceeds capacity.', ['Write the application questions', 'Schedule review sessions']],
+      ])
+    case 'ticketing':
+      return simple([
+        ['Luma ticketed event', 'Paid tiers on Luma', 'Early-bird, regular and speaker tickets, with QR check-in at the door.', ['Draft the event page from the plan', 'Set ticket tiers and prices', 'Create speaker and sponsor promo codes', 'Publish the event page']],
+        ['Luma free registration', 'Approval required', 'Free tickets with a manual review, when the room is small.', ['Draft the event page from the plan', 'Write the approval questions', 'Publish the event page']],
       ])
     case 'av':
       return simple([
@@ -172,9 +178,27 @@ function byTask(task: Task, ev: EventDetails): TaskResult[] | null {
       ])
     case 'dayof':
       return simple([
-        ['Live slides + QR', 'Google Slides', 'Attendees follow along on their phones.', ['Generate the deck', 'Print QR posters']],
         ['Volunteer roster', '12 shifts', 'Check-in, food, help desk and cleanup.', ['Recruit volunteers', 'Send the shift sheet']],
         ['Run sheet', 'Minute-by-minute', 'One page for the organizing team.', ['Share with leads', 'Do a walk-through the day before']],
+      ])
+    case 'slides':
+      return ev.type === 'conference'
+        ? simple([
+            ['Session decks', 'One per talk', 'Each speaker presents from Evently, so every room gets its own QR code.', ['Collect PDFs from speakers', 'Print a QR poster per room', 'Test the projector in each hall']],
+            ['Opening keynote deck', 'Draft ready', 'Welcome, schedule, Wi-Fi and sponsors.', ['Review the slides', 'Rehearse the keynote']],
+          ])
+        : simple([
+            ['Kickoff deck', 'Draft ready', 'Welcome, schedule, Wi-Fi, prizes and judging, drafted from your plan.', ['Review the slides', 'Print QR posters for the room', 'Test the projector']],
+            ['Demo-day deck', 'Order of teams', 'One slide per team, so the room knows who’s up next.', ['Collect team names after submissions', 'Add a slide per team']],
+          ])
+    case 'presentation':
+      return simple([
+        ['Agenda deck', 'Draft ready', 'Objectives, agenda and logistics, drafted from your plan.', ['Review the slides', 'Add the speakers’ sections', 'Share the QR code at the start']],
+        ['Your own deck', 'Upload a PDF', 'Already have slides? Present them from Evently so the room can follow along.', ['Export the deck as PDF', 'Upload it with the Upload button above']],
+      ])
+    case 'memories':
+      return simple([
+        ['Photo slideshow', 'Upload photos', 'Collect old photos and play them as a slideshow everyone can follow on their phones.', ['Ask guests to send photos', 'Upload them, one per slide', 'Put the QR code on the tables']],
       ])
   }
   return null

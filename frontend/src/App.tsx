@@ -1,27 +1,29 @@
 import { CloudOff, LoaderCircle, MessageCircle, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from './api/auth'
+import { getAuth, useAuth, type AuthSnapshot } from './api/auth'
 import { api, isApiError } from './api/client'
 import { isRunFinished, useEventStore } from './api/realtime'
 import type { ChatTurnOut } from './api/types'
 import ChatPanel from './components/ChatPanel'
 import IntakePage from './components/IntakePage'
 import Landing from './components/Landing'
+import LoginPage, { type AuthMode as FormMode } from './components/LoginPage'
 import MarketingPage from './components/MarketingPage'
 import PlanLoader from './components/PlanLoader'
-import SignIn from './components/SignIn'
 import WorkflowCanvas from './components/WorkflowCanvas'
-import { DEFAULT_HEADCOUNT, EVENT_TYPES, buildWorkflow, gatedByGoogle } from './data/workflows'
+import { DEFAULT_HEADCOUNT, EVENT_TYPES, buildWorkflow, gatedByGoogle, removeStep } from './data/workflows'
 import { localItem, mergeChat, serverTime, type ChatItem } from './features/chat/messages'
 import { createEvent, getEvent, useRequirementsSync } from './features/events/api'
-import { eventName, fromEvent, isoDate, toRequirements } from './features/events/requirements'
+import { eventName, fromEvent, isoDate, toRequirements, type EventRequirements } from './features/events/requirements'
+import { loadUser, signOut, type User } from './lib/auth'
 import { interpret, type ChatAction } from './lib/chat'
 import { extractAnswers, mergeFound } from './lib/extract'
-import { addRecent } from './lib/recent'
+import { newDeckId } from './lib/deckStore'
+import { addRecent, findRecentByEvent, linkRecent, savePlan, type RecentEvent, type Review, type SavedPlan } from './lib/recent'
 import { BUILD_NOW, QUESTIONS, SKIP, isRequired, missingRequired, nextQuestion, type IntakeAnswers } from './lib/intake'
 import { runTask, type RunnerContext } from './lib/runners'
-import type { EventDetails, EventType, Task, TaskResult } from './types'
+import type { ChatMessage, EventDetails, EventType, PlanStart, Task, TaskResult } from './types'
 
 // Short names for intake questions, for "I filled in: date, budget".
 const LABEL: Record<string, string> = {
@@ -61,18 +63,7 @@ function applyAction(tasks: Task[], a: ChatAction): Task[] {
       },
     ]
   }
-  if (a.kind === 'remove') {
-    const gone = tasks.find((t) => t.id === a.id)
-    if (!gone) return tasks
-    // Children of the removed step inherit its dependencies so the graph stays connected.
-    return tasks
-      .filter((t) => t.id !== a.id)
-      .map((t) =>
-        t.dependsOn.includes(a.id)
-          ? { ...t, dependsOn: [...new Set([...t.dependsOn.filter((d) => d !== a.id), ...gone.dependsOn])] }
-          : t,
-      )
-  }
+  if (a.kind === 'remove') return removeStep(tasks, a.id)
   return tasks
 }
 
@@ -91,6 +82,15 @@ function Centered({ children }: { children: ReactNode }) {
   return <main className="grid h-full place-items-center bg-gray-100 p-6 text-center text-muted">{children}</main>
 }
 
+// Signed in, or the backend lets requests through as its dev user.
+const isOnline = (a: Pick<AuthSnapshot, 'mode' | 'token'>) => a.mode === 'optional' || (a.mode === 'required' && Boolean(a.token))
+
+// Chat notes saved with a local plan (or shipped with a community plan) back into chat items, oldest first.
+const toLocal = (messages: ChatMessage[]): ChatItem[] => {
+  const base = Date.now() - messages.length
+  return messages.map((m, i) => localItem(m.role, m.text, (m as Partial<ChatItem>).at ?? base + i))
+}
+
 interface AppProps {
   /** Backend event from the /events/:eventId route; App loads it, and follows changes (back/forward, links). */
   routeEventId?: string
@@ -99,8 +99,19 @@ interface AppProps {
 export default function App({ routeEventId }: AppProps) {
   const auth = useAuth()
   const navigate = useNavigate()
-  // Signed in, or the backend lets requests through as its dev user.
-  const online = auth.mode === 'optional' || (auth.mode === 'required' && Boolean(auth.token))
+  const online = isOnline(auth)
+  // Accounts live on the server (it said 401 to an anonymous /auth/me): LoginPage signs in there.
+  const accounts = auth.mode === 'required'
+  // Demo profile from LoginPage's local flow (lib/auth), used whenever the server doesn't require accounts.
+  const [localUser, setLocalUser] = useState<User | null>(loadUser)
+  const user: User | null = accounts
+    ? auth.token && auth.user
+      ? { name: auth.user.name || auth.user.email, email: auth.user.email, provider: 'email' }
+      : null
+    : localUser
+  // Sign-in / sign-up form on screen, and the plan to start once it's done.
+  const [form, setForm] = useState<FormMode | null>(null)
+  const [pending, setPending] = useState<PlanStart | null>(null)
   // Past the marketing page. Deep links to an event skip it.
   const [entered, setEntered] = useState(Boolean(routeEventId))
   // The backend event this plan belongs to (null for local-only plans, or before it's created).
@@ -118,6 +129,8 @@ export default function App({ routeEventId }: AppProps) {
     [eventId, live.store],
   )
   const [event, setEvent] = useState<EventDetails | null>(null)
+  // Scopes this plan's live-slide decks, so a new plan doesn't reuse the last one's slides.
+  const [planId, setPlanId] = useState('')
   const [tasks, setTasks] = useState<Task[]>([])
   // Chat notes that only live in this browser (intake recap, approvals, rule-based edits, offline chat).
   const [local, setLocal] = useState<ChatItem[]>([])
@@ -147,6 +160,8 @@ export default function App({ routeEventId }: AppProps) {
   const [aiDown, setAiDown] = useState(false)
   // Bumped on every pick, so a slow extraction or create for an abandoned event is ignored.
   const pickSeq = useRef(0)
+  // Approve / ignore choices and checklist progress from the node map, saved with the plan.
+  const [review, setReview] = useState<Review>({ decisions: {}, progress: {} })
   const started = useRef(new Set<string>())
 
   // --- Persistence: every intake answer, detail change, plan edit and approval → debounced PATCH /events/{id}.
@@ -203,8 +218,20 @@ export default function App({ routeEventId }: AppProps) {
         const h = fromEvent(out)
         sync.markSaved(out.requirements, out.name)
         setAutoNamed(out.name === eventName(h.event))
+        // This browser's copy of the plan keeps what the server doesn't: agent results, shared steps, the review.
+        const cached = findRecentByEvent(out.id)
+        const kept = new Map(cached?.plan?.tasks.map((t) => [t.id, t]))
         setEvent(h.event)
-        setTasks(h.tasks)
+        setTasks(
+          h.tasks.map((t) => {
+            const c = kept.get(t.id)
+            return c?.status === 'done' && c.results ? { ...t, status: 'done', results: c.results, shared: c.shared } : t
+          }),
+        )
+        const saved = cached?.plan?.review
+        setReview(saved ? { ...saved, progress: saved.progress ?? {} } : { decisions: {}, progress: {} })
+        setPlanId(cached?.id ?? out.id)
+        if (!cached) addRecent({ id: out.id, type: h.event.type, eventId: out.id })
         setAnswers(h.answers)
         setApproved(h.approved)
         setIntake(h.intake)
@@ -248,10 +275,32 @@ export default function App({ routeEventId }: AppProps) {
 
   const say = (text: string) => setLocal((m) => [...m, localItem('assistant', text)])
 
-  const pick = (type: EventType, note?: string) => {
+  // POST /events for a plan started here (picked, copied, or made offline), then move to /events/{id}.
+  // Reads the auth store directly: right after signing in, this render's `online` is still stale.
+  const saveAsEvent = (localId: string, details: EventDetails, note: string, req: EventRequirements, seq: number) => {
+    if (!isOnline(getAuth())) return
+    setCreating(true)
+    createEvent(eventName(details), note, req)
+      .then(
+        (out) => {
+          linkRecent(localId, out.id)
+          if (seq !== pickSeq.current) return
+          sync.markSaved(out.requirements, out.name)
+          setAutoNamed(true)
+          setEventId(out.id)
+          navigate(`/events/${encodeURIComponent(out.id)}`, { replace: true })
+        },
+        () => undefined,
+      )
+      .finally(() => seq === pickSeq.current && setCreating(false))
+  }
+
+  // `skip`: steps a template leaves out.
+  const pick = (type: EventType, note?: string, skip?: string[]) => {
     const meta = EVENT_TYPES.find((e) => e.id === type)!
-    const wf = buildWorkflow(type)
-    addRecent({ type, note })
+    const wf = buildWorkflow(type, skip)
+    const id = newDeckId()
+    addRecent({ id, type, note })
     // Pull headcount / city out of a free-text landing prompt like "200-person hackathon in Austin".
     const patch = Object.assign(
       {},
@@ -260,6 +309,8 @@ export default function App({ routeEventId }: AppProps) {
     const details: EventDetails = { type, headcount: DEFAULT_HEADCOUNT[type], city: 'San Francisco', date: '', ...patch }
     setEvent(details)
     setTasks(wf)
+    setPlanId(id)
+    setReview({ decisions: {}, progress: {} })
     setSelectedId(null)
     setRunning(false)
     setApproved(false)
@@ -282,21 +333,7 @@ export default function App({ routeEventId }: AppProps) {
     const seq = ++pickSeq.current
 
     // Save the plan as a backend event (offline: it stays local, on sample data).
-    if (online) {
-      setCreating(true)
-      createEvent(eventName(details), note ?? '', toRequirements(details, pre, wf, false, false))
-        .then(
-          (out) => {
-            if (seq !== pickSeq.current) return
-            sync.markSaved(out.requirements, out.name)
-            setAutoNamed(true)
-            setEventId(out.id)
-            navigate(`/events/${encodeURIComponent(out.id)}`, { replace: true })
-          },
-          () => undefined,
-        )
-        .finally(() => seq === pickSeq.current && setCreating(false))
-    }
+    saveAsEvent(id, details, note ?? '', toRequirements(details, pre, wf, false, false), seq)
 
     if (!note) return setExtracting(false)
     // Let Claude fill in anything else the landing prompt already says (date, budget, food, …).
@@ -313,6 +350,63 @@ export default function App({ routeEventId }: AppProps) {
       })
       .finally(() => seq === pickSeq.current && setExtracting(false))
   }
+
+  // Opens a saved plan on the node map as it was left.
+  const openSaved = (id: string, p: SavedPlan) => {
+    const seq = ++pickSeq.current
+    started.current.clear()
+    setEvent(p.event)
+    setTasks(p.tasks)
+    setLocal(toLocal(p.messages))
+    setAnswers(p.answers)
+    setApproved(p.approved)
+    // Plans saved before checklist progress existed have `checked` instead; the map converts it.
+    setReview({ ...p.review, progress: p.review.progress ?? {} })
+    setPlanId(id)
+    setEventId(null)
+    setSelectedId(null)
+    setRunning(false)
+    setBuilding(false)
+    setIntake(false)
+    setExtracting(false)
+    setIntakeNote(null)
+    setIntakeInfo(null)
+    setPrefilled(['type'])
+    setPendingRun(null)
+    setChatOpen(false)
+    setSeenAt(Date.now())
+    return seq
+  }
+
+  // Reopens a recent event. One saved on the server reopens from there (the /events/:id route hydrates it and
+  // lays this browser's cache over it); a local plan reopens as it was saved; one that never got that far starts over.
+  const resume = (r: Pick<RecentEvent, 'id' | 'type' | 'note' | 'plan' | 'eventId'>) => {
+    if (r.eventId && online) return navigate(`/events/${encodeURIComponent(r.eventId)}`)
+    if (!r.plan) return pick(r.type, r.note)
+    const p = r.plan
+    const seq = openSaved(r.id, p)
+    // Made offline: save it to the server now that it's reachable.
+    if (!r.eventId) saveAsEvent(r.id, p.event, r.note ?? '', toRequirements(p.event, p.answers, p.tasks, p.approved, true), seq)
+  }
+
+  // Someone else's filled-out plan becomes a new event of the user's own, opened on the node map.
+  const copyPlan = (plan: SavedPlan, note: string) => {
+    const id = newDeckId()
+    addRecent({ id, type: plan.event.type, note })
+    const seq = openSaved(id, plan)
+    // Leave the welcome message unread so the chat badge points to it.
+    setSeenAt(0)
+    saveAsEvent(id, plan.event, note, toRequirements(plan.event, plan.answers, plan.tasks, plan.approved, true), seq)
+  }
+
+  const start = (s: PlanStart) => ('copy' in s ? copyPlan(s.copy, s.note) : pick(s.type, s.note, s.skip))
+
+  // Save the plan whenever it changes on the node map, so Recent Events reopens it there.
+  const onMap = !!event && !intake && !building
+  useEffect(() => {
+    // Only this browser's chat notes; the server keeps the backend chat history.
+    if (onMap && event && planId) savePlan(planId, { event, tasks, messages: local, answers, approved, review })
+  }, [onMap, event, tasks, local, answers, approved, review, planId])
 
   // Ends the questions and draws the plan. The draft message waits in the chat as an unread message.
   const finishIntake = (steps = tasks.length) => {
@@ -465,7 +559,8 @@ export default function App({ routeEventId }: AppProps) {
 
   const startRun = () => {
     started.current.clear()
-    setTasks((ts) => ts.map((t) => ({ ...t, status: 'queued', results: undefined })))
+    // Steps kept from a community plan stay done; agents fill in the rest.
+    setTasks((ts) => ts.map((t) => (t.shared && t.status === 'done' ? t : { ...t, status: 'queued', results: undefined })))
     setRunning(true)
   }
 
@@ -529,7 +624,7 @@ export default function App({ routeEventId }: AppProps) {
   const runOne = (id: string) => {
     const task = tasks.find((t) => t.id === id)
     if (!task || !event) return
-    setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, status: 'running', results: undefined, error: undefined } : t)))
+    setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, status: 'running', results: undefined, error: undefined, shared: undefined } : t)))
     runTask(task, event, runnerCtx).then(
       (results) => setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, status: 'done', results } : t))),
       (e: unknown) => failTask(id, e),
@@ -553,23 +648,61 @@ export default function App({ routeEventId }: AppProps) {
     if (routeEventId) navigate('/')
   }
 
+  // Already signed in: skip the form and go straight into the app.
+  const enter = (mode: FormMode, plan?: PlanStart) => {
+    if (!user) {
+      setPending(plan ?? null)
+      return setForm(mode)
+    }
+    setEntered(true)
+    if (plan) start(plan)
+  }
+
+  // LoginPage finished: with server accounts the session token is already stored (api/auth); else it's the demo profile.
+  const signedInAs = (u: User) => {
+    if (!accounts) setLocalUser(u)
+    setForm(null)
+    setEntered(true)
+    // Google sign-in also grants the Maps / Gmail / Calendar access the agents use.
+    if (u.provider === 'google') setGoogleConnected(true)
+    if (pending) start(pending)
+    setPending(null)
+  }
+
+  const logOut = () => {
+    signOut()
+    setLocalUser(null)
+    if (auth.token) auth.logout()
+    setGoogleConnected(false)
+    leaveEvent()
+    setEntered(false)
+  }
+
   // --- Render ----------------------------------------------------------------------------------------
   const pill = entered && event && !creating && !eventId ? <Pill text={auth.mode === 'offline' ? 'Offline — sample data' : 'Not saved — sample data'} /> : null
 
-  if (!entered) return <MarketingPage onStart={() => setEntered(true)} />
+  if (!entered) {
+    if (form) return <LoginPage mode={form} onMode={setForm} onDone={signedInAs} onBack={() => setForm(null)} backend={accounts} />
+    return <MarketingPage onStart={() => enter('signup')} onSignIn={() => enter('signin')} onPlan={(plan) => enter('signup', plan)} />
+  }
   if (auth.mode === 'loading')
     return (
       <Centered>
         <LoaderCircle className="animate-spin" size={22} />
       </Centered>
     )
+  // Deep link or expired session while the server requires accounts.
   if (auth.needsSignIn)
     return (
-      <SignIn
+      <LoginPage
+        mode={form ?? 'signin'}
+        onMode={setForm}
+        onDone={signedInAs}
         onBack={() => {
           leaveEvent()
           setEntered(false)
         }}
+        backend
       />
     )
   const deleted = Boolean(eventId && live.deleted)
@@ -590,7 +723,8 @@ export default function App({ routeEventId }: AppProps) {
       </Centered>
     )
   }
-  if (!event) return <Landing online={online} onPick={pick} onHome={() => setEntered(false)} />
+  if (!event)
+    return <Landing online={online} onPick={pick} onResume={resume} onHome={() => setEntered(false)} user={user} onSignOut={logOut} />
   if (intake)
     return (
       <>
@@ -622,7 +756,11 @@ export default function App({ routeEventId }: AppProps) {
   return (
     <main className="relative h-full bg-gray-100 p-3">
       <WorkflowCanvas
+        key={planId}
+        initialReview={review}
+        onReviewChange={setReview}
         event={event}
+        planId={planId}
         onBack={leaveEvent}
         onRunTask={runOne}
         onAddOption={addOption}

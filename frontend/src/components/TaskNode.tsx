@@ -1,5 +1,5 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
-import { AlertTriangle, Calendar, Check, ChevronRight, Contact, Globe, Loader2, Lock, Mail, MapPin, Presentation, Unlink } from 'lucide-react'
+import { AlertTriangle, Calendar, Check, ChevronRight, Contact, Globe, Loader2, Lock, Mail, MapPin, Network, Presentation, QrCode, Ticket, Unlink } from 'lucide-react'
 import { INTEGRATION_LABEL, gatedByGoogle } from '../data/workflows'
 import { venueActivity } from '../features/venues/model'
 import { NODE_H, NODE_W } from '../lib/layout'
@@ -7,7 +7,8 @@ import type { Integration, Task } from '../types'
 
 // `approved` / `reviewed`: how many of this step's options the user has approved / approved or ignored.
 export type TaskNodeType = Node<
-  { task: Task; selected: boolean; approved: number; reviewed: number; googleConnected: boolean; planApproved: boolean },
+  // `live`: a live-slides step whose deck is ready to present.
+  { task: Task; selected: boolean; approved: number; reviewed: number; googleConnected: boolean; planApproved: boolean; live?: boolean },
   'task'
 >
 
@@ -17,6 +18,9 @@ const ICON: Record<Integration, typeof Globe> = {
   'google-calendar': Calendar,
   'google-contacts': Contact,
   'google-slides': Presentation,
+  'live-slides': QrCode,
+  linkedin: Network,
+  luma: Ticket,
   web: Globe,
 }
 
@@ -32,7 +36,7 @@ const STATUS_STYLE = {
 } as const
 
 export default function TaskNode({ data }: NodeProps<TaskNodeType>) {
-  const { task, selected, approved, reviewed, googleConnected, planApproved } = data
+  const { task, selected, approved, reviewed, googleConnected, planApproved, live } = data
   // Finished agents only count as done once the user approves an option.
   // Agent finished: purple check once an option is approved, green (complete) once the plan is approved too.
   type Shown = Task['status'] | 'approved'
@@ -57,7 +61,14 @@ export default function TaskNode({ data }: NodeProps<TaskNodeType>) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="truncate text-[15px] font-semibold">{task.title}</div>
-          <div className="truncate text-xs text-muted">{task.agent} agent</div>
+          <div className="flex items-center gap-1.5 text-xs text-muted">
+            <span className="truncate">{task.agent} agent</span>
+            {live && (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rose-50 px-1.5 text-[10px] font-semibold text-rose-600">
+                <span className="size-1 rounded-full bg-rose-500" /> Live
+              </span>
+            )}
+          </div>
         </div>
         <StatusBadge status={unlinked ? 'blocked' : status} blockedBy={blockedBy} />
       </div>
