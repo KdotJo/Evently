@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 700" role="img" aria-labelledby="search-title search-desc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title id="search-title">Evently search memory</title>
+  <desc id="search-desc">Venue research, chat messages, talk transcripts and slides are copied into Elasticsearch. Venue memory, smarter chat, event search and live transcript search read from it. Search matches meaning, so "quiet venue with a terrace for 150" can find "calm rooftop space, room for about 200".</desc>
+  <style>
+    svg { --bg:#edf4f2; --surface:#ffffff; --sunken:#dde9e6; --fg:#10363a; --muted:#4b686b; --line:#a9c1bc; --accent:#08716c; --accent-soft:#d3ece8; --mark:#ffe16b; --mark-fg:#2b2500; }
+    @media (prefers-color-scheme: dark) {
+      svg { --bg:#0e1c1f; --surface:#162a2e; --sunken:#0a1518; --fg:#e4f1ee; --muted:#a2bcb9; --line:#3a565a; --accent:#62d3c9; --accent-soft:#173f40; --mark:#5f5111; --mark-fg:#ffefa8; }
+    }
+    .bg { fill: var(--bg); }
+    .box { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+    .drawer { fill: var(--mark); stroke: var(--mark); }
+    .use { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.3; }
+    .h1 { fill: var(--fg); font-size: 26px; font-weight: 700; }
+    .h2 { fill: var(--fg); font-size: 22px; font-weight: 700; }
+    .t { fill: var(--fg); font-size: 16px; font-weight: 600; }
+    .dt { fill: var(--mark-fg); font-size: 16px; font-weight: 600; }
+    .s { fill: var(--muted); font-size: 13px; }
+    .q { fill: var(--fg); font-size: 14.5px; }
+    .p { fill: var(--fg); font-size: 15px; }
+    .big { fill: var(--fg); font-size: 19px; font-weight: 600; }
+    .lane { fill: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; }
+    .e { stroke: var(--muted); stroke-width: 1.4; fill: none; }
+    .dots { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 2 5; stroke-linecap: round; fill: none; }
+    .tip { fill: var(--muted); }
+  </style>
+  <defs>
+    <marker id="b" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="tip" d="M0 0L8 4L0 8z"/></marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1040" height="700"/>
+  <text class="h1" x="30" y="42">One search memory, four ways to use it</text>
+
+  <text class="lane" x="30" y="82">EVENTLY CREATES</text>
+  <text class="lane" x="292" y="82">ELASTICSEARCH KEEPS</text>
+  <text class="lane" x="576" y="82">PEOPLE ASK</text>
+
+  <rect class="box" x="30" y="94" width="220" height="64" rx="3"/><text class="t" x="140" y="132" text-anchor="middle">Venue research</text>
+  <rect class="box" x="30" y="170" width="220" height="64" rx="3"/><text class="t" x="140" y="208" text-anchor="middle">Chat messages</text>
+  <rect class="box" x="30" y="246" width="220" height="64" rx="3"/><text class="t" x="140" y="284" text-anchor="middle">Talk transcripts</text>
+  <rect class="box" x="30" y="322" width="220" height="64" rx="3"/><text class="t" x="140" y="360" text-anchor="middle">Slides</text>
+
+  <path class="e" d="M250 126L290 126" marker-end="url(#b)"/><path class="e" d="M250 202L290 202" marker-end="url(#b)"/><path class="e" d="M250 278L290 278" marker-end="url(#b)"/><path class="e" d="M250 354L290 354" marker-end="url(#b)"/>
+
+  <rect class="drawer" x="292" y="94" width="220" height="64" rx="3"/><text class="dt" x="402" y="132" text-anchor="middle">Venues</text>
+  <rect class="drawer" x="292" y="170" width="220" height="64" rx="3"/><text class="dt" x="402" y="208" text-anchor="middle">Chat</text>
+  <rect class="drawer" x="292" y="246" width="220" height="64" rx="3"/><text class="dt" x="402" y="284" text-anchor="middle">Transcripts</text>
+  <rect class="drawer" x="292" y="322" width="220" height="64" rx="3"/><text class="dt" x="402" y="360" text-anchor="middle">Slides</text>
+
+  <path class="e" d="M520 112L536 112L536 368L520 368"/>
+  <path class="e" d="M536 240L574 240" marker-end="url(#b)"/>
+
+  <rect class="use" x="576" y="94" width="434" height="64" rx="3"/>
+  <text class="t" x="592" y="120">Venue memory</text><text class="s" x="994" y="120" text-anchor="end">searches venues</text>
+  <text class="q" x="592" y="143">"Have we looked at a quiet venue with a terrace before?"</text>
+  <rect class="use" x="576" y="170" width="434" height="64" rx="3"/>
+  <text class="t" x="592" y="196">Smarter chat</text><text class="s" x="994" y="196" text-anchor="end">searches all four</text>
+  <text class="q" x="592" y="219">"What did we say about parking?"</text>
+  <rect class="use" x="576" y="246" width="434" height="64" rx="3"/>
+  <text class="t" x="592" y="272">Event search</text><text class="s" x="994" y="272" text-anchor="end">chat, transcripts, slides</text>
+  <text class="q" x="592" y="295">"Where did rush hour come up in this event?"</text>
+  <rect class="use" x="576" y="322" width="434" height="64" rx="3"/>
+  <text class="t" x="592" y="348">Live transcript search</text><text class="s" x="994" y="348" text-anchor="end">transcripts</text>
+  <text class="q" x="592" y="371">"What has the speaker said about pricing?"</text>
+
+  <text class="p" x="30" y="424">Postgres keeps the originals. Elasticsearch is a copy built for finding things, and it can be rebuilt at any time.</text>
+
+  <line x1="30" y1="448" x2="1010" y2="448" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 4"/>
+
+  <text class="h2" x="30" y="488">It matches what you mean</text>
+
+  <text class="lane" x="30" y="522">A PLANNER TYPES</text>
+  <text class="big" x="30" y="549">quiet venue with a terrace for 150</text>
+  <text class="lane" x="576" y="522">A PAST VENUE CARD SAYS</text>
+  <text class="big" x="576" y="549">calm rooftop space, room for about 200</text>
+
+  <rect class="drawer" x="30" y="568" width="220" height="30" rx="3"/><text class="dt" x="140" y="589" text-anchor="middle">quiet</text>
+  <path class="dots" d="M256 583L570 583"/>
+  <rect class="drawer" x="576" y="568" width="220" height="30" rx="3"/><text class="dt" x="686" y="589" text-anchor="middle">calm</text>
+  <rect class="drawer" x="30" y="604" width="220" height="30" rx="3"/><text class="dt" x="140" y="625" text-anchor="middle">terrace</text>
+  <path class="dots" d="M256 619L570 619"/>
+  <rect class="drawer" x="576" y="604" width="220" height="30" rx="3"/><text class="dt" x="686" y="625" text-anchor="middle">rooftop space</text>
+  <rect class="drawer" x="30" y="640" width="220" height="30" rx="3"/><text class="dt" x="140" y="661" text-anchor="middle">150 guests</text>
+  <path class="dots" d="M256 655L570 655"/>
+  <rect class="drawer" x="576" y="640" width="220" height="30" rx="3"/><text class="dt" x="686" y="661" text-anchor="middle">fits about 200</text>
+
+  <text class="t" x="816" y="606">No words in common,</text>
+  <text class="t" x="816" y="628">still a match.</text>
+</svg>

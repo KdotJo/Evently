@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -50 1080 916" role="img" aria-labelledby="arch-title arch-desc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title id="arch-title">Evently architecture</title>
+  <desc id="arch-desc">A React frontend talks to a FastAPI pod in Kubernetes. The pod runs the chat orchestrator, research and deck agents, live sessions and outreach, connected by an event bus. Postgres and Redis run in the cluster. Claude or OpenAI, Google and weather data, speech-to-text, email and Luma, Elastic Cloud and Dash0 are external services. GitHub Actions, SonarQube Cloud and Gitar check code changes.</desc>
+  <style>
+    svg { --bg:#edf4f2; --surface:#ffffff; --sunken:#dde9e6; --fg:#10363a; --muted:#4b686b; --line:#a9c1bc; --accent:#08716c; --accent-soft:#d3ece8; --mark:#ffe16b; --mark-fg:#2b2500; }
+    @media (prefers-color-scheme: dark) {
+      svg { --bg:#0e1c1f; --surface:#162a2e; --sunken:#0a1518; --fg:#e4f1ee; --muted:#a2bcb9; --line:#3a565a; --accent:#62d3c9; --accent-soft:#173f40; --mark:#5f5111; --mark-fg:#ffefa8; }
+    }
+    .bg { fill: var(--bg); }
+    .group { fill: none; stroke: var(--line); stroke-width: 1.4; stroke-dasharray: 6 5; }
+    .pod { fill: var(--sunken); stroke: var(--line); stroke-width: 1.2; }
+    .box { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+    .tool { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.4; }
+    .bus { fill: var(--mark); stroke: var(--mark); }
+    .h1 { fill: var(--fg); font-size: 26px; font-weight: 700; }
+    .t { fill: var(--fg); font-size: 15px; font-weight: 600; }
+    .s { fill: var(--muted); font-size: 13px; }
+    .lane { fill: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; }
+    .bt { fill: var(--mark-fg); font-size: 14.5px; font-weight: 600; }
+    .link { fill: var(--muted); font-size: 13px; }
+    .badge { fill: var(--accent); font-size: 12.5px; font-weight: 600; }
+    .e { stroke: var(--muted); stroke-width: 1.4; fill: none; }
+    .tip { fill: var(--muted); }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="tip" d="M0 0L8 4L0 8z"/></marker>
+  </defs>
+
+  <rect class="bg" x="0" y="-50" width="1080" height="916"/>
+  <text class="h1" x="40" y="-12">How Evently fits together</text>
+
+  <!-- Frontend -->
+  <rect class="group" x="40" y="24" width="720" height="114" rx="4"/>
+  <text class="lane" x="56" y="46">REACT + VITE FRONTEND</text>
+  <rect class="box" x="56" y="58" width="216" height="66" rx="3"/>
+  <text class="t" x="70" y="85">Planner workspace</text><text class="s" x="70" y="106">chat, whiteboard, outreach</text>
+  <rect class="box" x="288" y="58" width="216" height="66" rx="3"/>
+  <text class="t" x="302" y="85">Presenter view</text><text class="s" x="302" y="106">slides, mic, live transcript</text>
+  <rect class="box" x="520" y="58" width="216" height="66" rx="3"/>
+  <text class="t" x="534" y="85">Attendee view</text><text class="s" x="534" y="106">QR join, slides, phone audio</text>
+
+  <path class="e" d="M400 138L400 176" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text class="link" x="412" y="162">REST and WebSockets through ingress-nginx</text>
+
+  <!-- Cluster -->
+  <rect class="group" x="40" y="178" width="720" height="456" rx="4"/>
+  <text class="lane" x="56" y="198">KUBERNETES, NAMESPACE EVENTLY</text>
+  <text class="badge" x="744" y="198" text-anchor="end">Radar shows this cluster</text>
+
+  <rect class="pod" x="56" y="208" width="688" height="326" rx="3"/>
+  <text class="lane" x="72" y="228">EVENTLY-API POD (FASTAPI)</text>
+
+  <rect class="box" x="72" y="238" width="656" height="44" rx="3"/>
+  <text class="t" x="400" y="265" text-anchor="middle">API and realtime gateway: REST routes, WebSocket and SSE streams</text>
+
+  <rect class="box" x="72" y="296" width="152" height="76" rx="3"/>
+  <text class="t" x="84" y="320">Orchestrator</text><text class="s" x="84" y="340">chat, plans, calls</text><text class="s" x="84" y="357">tools, starts agents</text>
+  <rect class="box" x="240" y="296" width="152" height="76" rx="3"/>
+  <text class="t" x="252" y="320">Research agents</text><text class="s" x="252" y="340">venues and decks,</text><text class="s" x="252" y="357">run in parallel</text>
+  <rect class="box" x="408" y="296" width="152" height="76" rx="3"/>
+  <text class="t" x="420" y="320">Live sessions</text><text class="s" x="420" y="340">audio, transcription,</text><text class="s" x="420" y="357">voice slide changes</text>
+  <rect class="box" x="576" y="296" width="152" height="76" rx="3"/>
+  <text class="t" x="588" y="320">Outreach</text><text class="s" x="588" y="340">email and Luma,</text><text class="s" x="588" y="357">sent after approval</text>
+
+  <path class="e" d="M148 282L148 294" marker-end="url(#a)"/><path class="e" d="M316 282L316 294" marker-end="url(#a)"/><path class="e" d="M484 282L484 294" marker-end="url(#a)"/><path class="e" d="M652 282L652 294" marker-end="url(#a)"/>
+
+  <rect class="bus" x="72" y="386" width="656" height="40" rx="3"/>
+  <text class="bt" x="400" y="411" text-anchor="middle">Event bus: every state change is one envelope with a trace ID, streamed to browsers</text>
+  <path class="e" d="M148 372L148 384" marker-end="url(#a)"/><path class="e" d="M316 372L316 384" marker-end="url(#a)"/><path class="e" d="M484 372L484 384" marker-end="url(#a)"/><path class="e" d="M652 372L652 384" marker-end="url(#a)"/>
+
+  <rect class="box" x="72" y="440" width="152" height="80" rx="3"/>
+  <text class="t" x="84" y="465">SearchIndexer</text><text class="s" x="84" y="485">copies bus events</text><text class="s" x="84" y="502">into search</text>
+  <rect class="box" x="240" y="440" width="152" height="80" rx="3"/>
+  <text class="t" x="252" y="465">LLM router</text><text class="s" x="252" y="485">picks a provider</text><text class="s" x="252" y="502">for each feature</text>
+  <rect class="box" x="408" y="440" width="152" height="80" rx="3"/>
+  <text class="t" x="420" y="465">Data providers</text><text class="s" x="420" y="485">places, traffic</text><text class="s" x="420" y="502">and weather</text>
+  <rect class="box" x="576" y="440" width="152" height="80" rx="3"/>
+  <text class="t" x="588" y="465">OpenTelemetry</text><text class="s" x="588" y="485">custom agent and</text><text class="s" x="588" y="502">LLM spans, metrics</text>
+  <path class="e" d="M148 426L148 438" marker-end="url(#a)"/>
+
+  <rect class="box" x="72" y="552" width="320" height="66" rx="3"/>
+  <text class="t" x="86" y="579">Postgres</text><text class="s" x="86" y="600">source of truth for events, cards, decks</text>
+  <rect class="box" x="408" y="552" width="320" height="66" rx="3"/>
+  <text class="t" x="422" y="579">Redis</text><text class="s" x="422" y="600">carries the event bus between pods</text>
+  <path class="e" d="M232 534L232 552"/><path class="e" d="M568 534L568 552"/>
+
+  <!-- External -->
+  <text class="lane" x="810" y="198">EXTERNAL SERVICES</text>
+  <rect class="box" x="810" y="208" width="240" height="48" rx="3"/><text class="t" x="824" y="228">Claude (default), OpenAI</text><text class="s" x="824" y="246">every LLM call</text>
+  <rect class="box" x="810" y="264" width="240" height="48" rx="3"/><text class="t" x="824" y="284">Places, Routes, Open-Meteo</text><text class="s" x="824" y="302">venue, traffic and weather data</text>
+  <rect class="box" x="810" y="320" width="240" height="48" rx="3"/><text class="t" x="824" y="340">Deepgram, AssemblyAI</text><text class="s" x="824" y="358">live speech-to-text, or OpenAI</text>
+  <rect class="box" x="810" y="376" width="240" height="48" rx="3"/><text class="t" x="824" y="396">Resend or SMTP, Luma</text><text class="s" x="824" y="414">emails and event pages</text>
+  <rect class="tool" x="810" y="432" width="240" height="48" rx="3"/><text class="t" x="824" y="452">Elastic Cloud</text><text class="s" x="824" y="470">keyword + semantic search</text>
+  <rect class="tool" x="810" y="488" width="240" height="48" rx="3"/><text class="t" x="824" y="508">Dash0</text><text class="s" x="824" y="526">traces and metrics over OTLP</text>
+  <path class="e" d="M744 232L808 232" marker-end="url(#a)"/><path class="e" d="M744 288L808 288" marker-end="url(#a)"/><path class="e" d="M744 344L808 344" marker-end="url(#a)"/><path class="e" d="M744 400L808 400" marker-end="url(#a)"/><path class="e" d="M744 456L808 456" marker-end="url(#a)"/><path class="e" d="M744 512L808 512" marker-end="url(#a)"/>
+
+  <rect class="tool" x="810" y="566" width="16" height="16" rx="2"/>
+  <text class="s" x="834" y="579">Search, observability and</text>
+  <text class="s" x="834" y="596">code-review integrations</text>
+
+  <!-- Delivery -->
+  <line x1="40" y1="654" x2="1050" y2="654" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 4"/>
+  <text class="lane" x="40" y="676">HOW CODE SHIPS</text>
+  <rect class="box" x="40" y="688" width="160" height="164" rx="3"/>
+  <text class="t" x="120" y="764" text-anchor="middle">Code change</text><text class="s" x="120" y="784" text-anchor="middle">push or pull request</text>
+  <rect class="box" x="250" y="688" width="240" height="104" rx="3"/>
+  <text class="t" x="370" y="734" text-anchor="middle">GitHub Actions</text><text class="s" x="370" y="754" text-anchor="middle">Ruff, Pytest, coverage</text>
+  <rect class="tool" x="560" y="688" width="490" height="48" rx="3"/>
+  <text class="t" x="576" y="717">SonarQube Cloud</text><text class="s" x="1034" y="717" text-anchor="end">code quality gate, Ruff and coverage reports</text>
+  <rect class="box" x="560" y="744" width="490" height="48" rx="3"/>
+  <text class="t" x="576" y="773">Container image</text><text class="s" x="1034" y="773" text-anchor="end">pushed to GitHub Container Registry</text>
+  <rect class="tool" x="250" y="804" width="800" height="48" rx="3"/>
+  <text class="t" x="266" y="833">Gitar on pull requests</text><text class="s" x="1034" y="833" text-anchor="end">AI review against .gitar/rules: frozen files, offline tests, package ownership</text>
+  <path class="e" d="M200 740L248 740" marker-end="url(#a)"/><path class="e" d="M200 828L248 828" marker-end="url(#a)"/>
+  <path class="e" d="M490 712L558 712" marker-end="url(#a)"/><path class="e" d="M490 768L558 768" marker-end="url(#a)"/>
+</svg>
