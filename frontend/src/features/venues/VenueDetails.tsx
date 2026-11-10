@@ -98,7 +98,7 @@ function sectionLines(key: SectionKey, d: VenueCardData): { head?: string; body?
 
 const scoreTone = (s: number) => (s >= 75 ? 'bg-emerald-100 text-emerald-700' : s >= 50 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700')
 
-function ScoreBadge({ score }: { score: number | null | undefined }) {
+export function ScoreBadge({ score }: { score: number | null | undefined }) {
   if (score == null) return null
   return <span className={`rounded-md px-1.5 py-px font-mono text-[10px] font-bold ${scoreTone(score)}`}>{score}</span>
 }

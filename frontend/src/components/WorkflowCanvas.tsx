@@ -12,6 +12,7 @@ import { addFields, addFormHeight, buildOption, type FieldKey } from '../lib/opt
 import type { Review } from '../lib/recent'
 import type { RunnerContext } from '../lib/runners'
 import { useLiveVenueTasks } from '../features/venues/useLiveVenueTasks'
+import VenueMemoryPanel from '../features/venues/VenueMemoryPanel'
 import type { EventDetails, Task, TaskResult } from '../types'
 import ResultNode, { type Decision, type LiveInfo, type ResultItem, type ResultNodeType } from './ResultNode'
 import TaskNode, { type TaskNodeType } from './TaskNode'
@@ -598,6 +599,7 @@ export default function WorkflowCanvas({
         </ReactFlow>
       </div>
 
+      <VenueMemoryPanel tasks={tasks} selectedId={selectedId} hidden={focus != null} event={event} ctx={ctx} />
     </section>
   )
 }

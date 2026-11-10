@@ -828,6 +828,14 @@ tasks:
         fi
         echo ""
 
+  demo:seed:
+    desc: "Seed demo events and venues via the API (BASE_URL to override; ACCESS_TOKEN env; `-- --reset` deletes only seeded events)"
+    preconditions:
+      - sh: test -x {{.VENV}}/bin/python
+        msg: "No virtualenv yet. Run: task setup"
+    cmds:
+      - '{{.VENV}}/bin/python scripts/seed_demo.py --base-url {{.BASE_URL}} {{.CLI_ARGS}}'
+
   health:
     desc: GET /api/v1/health (BASE_URL=http://api.evently.localtest.me to check the kind ingress)
     cmds:

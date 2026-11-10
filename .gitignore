@@ -223,3 +223,5 @@ __marimo__/
 *.db
 *.db-wal
 *.db-shm
+# Raw Places responses cached by backend/scripts/seed_demo.py (Google's terms restrict storing them)
+backend/.demo_seed_snapshot.*

@@ -1,23 +1,44 @@
 # Evently
 
-1. Event Type: Business, Weddings (coming soon), Reunions (coming soon), Hackathon
-   a. Choose an event, size of event and the AI will come up with a event to do list -> with chat box on the side to edit any changes
-   b. If the event flow is confirmed then the AI will spin up a bunch of agents that will fetch different tasks
-
-2. Tasks: Location, Sponsors, Catering, Presentation, Transcript (optional of voice dynamic slide change), QR code to see live slide
-
-UI Design
-
-
-AI-assisted event planning. A planner chats with Claude; the AI spins up research agents that find
-and vet venues (capacity, parking, weather, rush-hour traffic) and shows each one as a live card on
-a whiteboard. The planner can generate a slide deck, present it with live transcription and
+AI-assisted event planning. A planner chats with an AI that spins up research agents to find and
+vet venues (capacity, parking, weather, rush-hour traffic) and shows each one as a live card on a
+whiteboard. The planner can generate a slide deck, present it with live transcription and
 voice-driven slide changes, and let attendees' phones follow along and act as loudspeakers. Emails
-and a Luma event can be drafted in chat and sent after confirmation.
+and a Luma event page are drafted in chat and sent only after confirmation.
+
+## Architecture
+
+[![How Evently fits together — system overview: clients connect through REST and WebSocket gateways to one FastAPI service; chat, presentation and venue agents publish to the EventBus; Claude, Google Maps, email/Luma, LiveKit and STT providers are third parties; Postgres, Redis, Elasticsearch and Dash0 on the platform tier](docs/architecture/page-1.png)](docs/architecture/Evently-Architecture-Map.pdf)
+
+Every state change flows through the EventBus as a sequenced envelope, so the whiteboard, decks and
+live session are projections of running agents rather than UI state with a backend bolted on.
+Full map as a PDF: [docs/architecture/Evently-Architecture-Map.pdf](docs/architecture/Evently-Architecture-Map.pdf)
+(interactive version: <https://claude.ai/artifact/PsmW2qY3YxtwmvSwBoowuM>). The other three views:
+
+<details>
+<summary><b>2 · Agent fan-out</b> — one venue search becomes a scout, N research agents (one per card) and a ranker; one deck request becomes an outline and N slide renderers</summary>
+
+![Venue search fan-out: orchestrator → venue_search coordinator → venue_scout, then N venue_research agents each bound to a venue card, then rank by score and a summary card](docs/architecture/page-2.png)
+
+![Deck build fan-out: orchestrator → presentation_build coordinator → outline, then one slide_render agent per slide, each filling its own Slide row](docs/architecture/page-3.png)
+</details>
+
+<details>
+<summary><b>3 · Live session</b> — the presenter's microphone is fanned out to attendee phones and teed to speech-to-text, whose transcript drives the SlideTracker</summary>
+
+![Live session data flow: PCM16 audio from the presenter device into the AudioHub, fan-out to bounded listener queues, tee into the STT pipeline and provider, transcript into the live session service and SlideTracker, envelopes out to the session socket](docs/architecture/page-4.png)
+</details>
+
+<details>
+<summary><b>4 · Platform &amp; integrations</b> — GitHub → CI → Sonar + Gitar; a single-replica API Deployment on Kubernetes with Postgres, Elasticsearch, Redis and OpenTelemetry → Dash0, watched by Radar; agent Jobs planned</summary>
+
+![Platform: pull requests run CI, a SonarQube Cloud scan and a Gitar review; the image deploys to a Kubernetes cluster where the API talks to Postgres, Elasticsearch, Redis and an OTel collector feeding Dash0; Radar watches the cluster; one-pod-per-agent Jobs are planned](docs/architecture/page-5.png)
+</details>
 
 ```
+frontend/       React + Vite planner app, presenter and attendee pages
 backend/        FastAPI backend (Python 3.13) — see backend/docs
-.github/        CI: ruff, pytest, SonarQube Cloud scan, Docker image to GHCR
+.github/        CI: ruff, pytest, SonarQube Cloud scan, container image to GHCR
 .gitar/         Gitar review rules (architecture rules enforced on PRs)
 ```
 
