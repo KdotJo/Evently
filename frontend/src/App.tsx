@@ -604,7 +604,7 @@ export default function App({ routeEventId }: AppProps) {
         localItem(
           'assistant',
           blocked
-            ? `Finished what I could. ${blocked} step${blocked > 1 ? 's are' : ' is'} waiting on Google access — connect Google and run again.`
+            ? `Finished what I could. ${blocked} step${blocked > 1 ? 's are' : ' is'} waiting on Google access — connect Google and I’ll pick up from there.`
             : 'All agents finished. Click any step to review what they found.',
         ),
       ])
@@ -626,15 +626,25 @@ export default function App({ routeEventId }: AppProps) {
     if (!task || !event) return
     setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, status: 'running', results: undefined, error: undefined, shared: undefined } : t)))
     runTask(task, event, runnerCtx).then(
-      (results) => setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, status: 'done', results } : t))),
+      (results) => {
+        setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, status: 'done', results } : t)))
+        unblock()
+      },
       (e: unknown) => failTask(id, e),
     )
+  }
+
+  // Put blocked steps back in the queue so the scheduler picks up where it stopped: it starts
+  // each one whose dependencies are now done and re-blocks the rest. Before approval they go idle.
+  const unblock = () => {
+    setTasks((ts) => ts.map((t) => (t.status === 'blocked' ? { ...t, status: approved ? 'queued' : 'idle', blockedBy: undefined } : t)))
+    if (approved) setRunning(true)
   }
 
   const connectGoogle = () => {
     // TODO: replace with real Google OAuth (Maps, Gmail, Calendar, Contacts, Slides scopes).
     setGoogleConnected((c) => !c)
-    setTasks((ts) => ts.map((t) => (t.status === 'blocked' ? { ...t, status: 'idle', blockedBy: undefined } : t)))
+    unblock()
   }
 
   // Leaving a plan detaches it from its backend event (and the /events/:id URL). The event stays saved.

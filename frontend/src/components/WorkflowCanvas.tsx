@@ -1,11 +1,11 @@
 import { Background, Controls, ReactFlow, type Edge, type ReactFlowInstance } from '@xyflow/react'
-import { ArrowLeft, Check, CheckCircle2, Link2, Loader2, MapPin, Users } from 'lucide-react'
+import { ArrowLeft, Check, CheckCircle2, CircleAlert, Clock, Link2, Loader2, MapPin, Users } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Deck } from '../data/demoDeck'
 import { draftDeck } from '../data/draftDecks'
 import { EVENT_TYPES, INTEGRATION_LABEL, gatedByGoogle } from '../data/workflows'
 import { optionDeckId, saveDeck, useDecks } from '../lib/deckStore'
-import { runChecklist, type Progress, type TodoProgress } from '../lib/execute'
+import { applyReply, followUp, isAwaiting, isDone, isOpen, runChecklist, watchReply, type Progress, type TodoProgress } from '../lib/execute'
 import { layout, type Box } from '../lib/layout'
 import { audienceUrl, presenterUrl, uploadUrl } from '../lib/live'
 import { addFields, addFormHeight, buildOption, type FieldKey } from '../lib/options'
@@ -176,10 +176,10 @@ export default function WorkflowCanvas({
         const items = r.todo ?? []
         const cur = progress[key] ?? []
         if (!approved || decisionFor(decisions, approved, key) !== 'approved') continue
-        if (items.every((_, i) => cur[i] && cur[i].status !== 'pending' && cur[i].status !== 'working')) continue
+        if (items.every((_, i) => !isOpen(cur[i], googleConnected))) continue
         want.add(key)
         if (runs.current.has(key)) continue
-        const stop = runChecklist(t, r, event, cur, (i, p) =>
+        const stop = runChecklist(t, r, event, googleConnected, cur, (i, p) =>
           setProgress((all) => {
             const list = [...(all[key] ?? [])]
             // The user already ticked it by hand: keep theirs.
@@ -196,8 +196,39 @@ export default function WorkflowCanvas({
       runs.current.delete(key)
       setProgress((all) => (all[key]?.some((p) => p?.status === 'working') ? { ...all, [key]: all[key].map((p) => (p?.status === 'working' ? { status: 'pending' } : p)) } : all))
     }
-  }, [tasks, decisions, approved, progress]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tasks, decisions, approved, progress, googleConnected]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => runs.current.forEach((stop) => stop()), [])
+
+  // Items waiting on an email reply: watch each thread until someone answers. A confirmation
+  // finishes the item; a question or a no hands it back to the user (see lib/execute).
+  const watchers = useRef(new Map<string, () => void>())
+  useEffect(() => {
+    const want = new Set<string>()
+    for (const [key, list] of Object.entries(progress))
+      list.forEach((p, i) => {
+        if (!isAwaiting(p) || !p.thread) return
+        const id = `${key}#${i}`
+        want.add(id)
+        if (watchers.current.has(id)) return
+        const stop = watchReply(p.thread, (reply) => {
+          watchers.current.delete(id)
+          setProgress((all) => {
+            const cur = all[key]?.[i]
+            if (!isAwaiting(cur) || !cur?.thread) return all
+            const next = [...all[key]]
+            next[i] = applyReply(cur.thread, reply)
+            return { ...all, [key]: next }
+          })
+        })
+        watchers.current.set(id, stop)
+      })
+    for (const [id, stop] of watchers.current) {
+      if (want.has(id)) continue
+      stop()
+      watchers.current.delete(id)
+    }
+  }, [progress])
+  useEffect(() => () => watchers.current.forEach((stop) => stop()), [])
 
   const openTask = tasks.find((t) => t.id === open)
 
@@ -299,6 +330,26 @@ export default function WorkflowCanvas({
     return { approvedCount, reviewedCount }
   }, [tasks, decisions, approved])
 
+  // A step is complete only when every approved option's checklist is done, so emails still
+  // waiting on a reply keep it open. `awaiting`: items per step waiting on a reply. `needsYou`: items
+  // the agent handed back, such as a reply that declined or asked a question.
+  const { awaiting, needsYou, finished } = useMemo(() => {
+    const awaiting: Record<string, number> = {}
+    const needsYou: Record<string, number> = {}
+    const finished: Record<string, boolean> = {}
+    for (const t of tasks) {
+      const picked = (t.results ?? []).filter((r) => decisionFor(decisions, approved, resultKey(t.id, r)) === 'approved')
+      finished[t.id] = picked.length > 0
+      for (const r of picked) {
+        const cur = progress[resultKey(t.id, r)] ?? []
+        awaiting[t.id] = (awaiting[t.id] ?? 0) + cur.filter(isAwaiting).length
+        needsYou[t.id] = (needsYou[t.id] ?? 0) + cur.filter((p) => p?.status === 'needs-you').length
+        if (!(r.todo ?? []).every((_, i) => isDone(cur[i]))) finished[t.id] = false
+      }
+    }
+    return { awaiting, needsYou, finished }
+  }, [tasks, decisions, approved, progress])
+
   const keyOf = (item: ResultItem) => (item.kind === 'result' && open ? resultKey(open, item.result) : '')
 
   // Ticking by hand marks an item done by you; unticking sends it back to the agent's queue.
@@ -307,6 +358,17 @@ export default function WorkflowCanvas({
       const list = [...(all[key] ?? [])]
       list[i] = list[i]?.status === 'done' ? { status: 'pending' } : { status: 'done', by: 'you' }
       return { ...all, [key]: list }
+    })
+  }, [])
+
+  // The agent emails the thread again after a question or a no, and goes back to waiting.
+  const followUpTodo = useCallback((key: string, i: number) => {
+    setProgress((all) => {
+      const thread = all[key]?.[i]?.thread
+      if (!thread) return all
+      const next = [...all[key]]
+      next[i] = followUp(thread)
+      return { ...all, [key]: next }
     })
   }, [])
 
@@ -343,6 +405,9 @@ export default function WorkflowCanvas({
             selected: task.id === selectedId,
             approved: approvedCount[task.id] ?? 0,
             reviewed: reviewedCount[task.id] ?? 0,
+            awaiting: awaiting[task.id] ?? 0,
+            needsYou: needsYou[task.id] ?? 0,
+            finished: finished[task.id] ?? false,
             googleConnected,
             planApproved: approved,
             live: liveSteps.has(task.id),
@@ -369,6 +434,7 @@ export default function WorkflowCanvas({
             onOpen: () => setFocus((f) => (f === i ? null : i)),
             onDecide: (d: Decision) => decide(keyOf(item), d),
             onToggleTodo: (t: number) => toggleTodo(keyOf(item), t),
+            onFollowUp: (t: number) => followUpTodo(keyOf(item), t),
             onConnectGoogle: connectAndRun,
             onRetry: () => open && onRunTask(open),
             onAdd: addOption,
@@ -381,7 +447,7 @@ export default function WorkflowCanvas({
         }),
       ),
     ],
-    [tasks, boxes, children, items, open, selectedId, spread, focus, progress, approvedCount, reviewedCount, googleConnected, approved, event, ctx, openTask, decide, toggleTodo, connectAndRun, updateResult, decks], // eslint-disable-line react-hooks/exhaustive-deps
+    [tasks, boxes, children, items, open, selectedId, spread, focus, progress, approvedCount, reviewedCount, awaiting, needsYou, finished, googleConnected, approved, event, ctx, openTask, decide, toggleTodo, followUpTodo, connectAndRun, updateResult, decks], // eslint-disable-line react-hooks/exhaustive-deps
   )
 
   const flowRef = useRef<ReactFlowInstance<TaskNodeType | ResultNodeType> | null>(null)
@@ -440,8 +506,10 @@ export default function WorkflowCanvas({
     return [...deps, ...fan]
   }, [tasks, items, open, spread])
 
-  // Matches the checkmark on step nodes: agent finished and at least one option approved.
-  const done = tasks.filter((t) => t.status === 'done' && approvedCount[t.id] > 0).length
+  // Matches the green check on step nodes: every approved option's checklist is done, replies included.
+  const done = tasks.filter((t) => t.status === 'done' && finished[t.id]).length
+  const waiting = Object.values(awaiting).reduce((a, b) => a + b, 0)
+  const handedBack = Object.values(needsYou).reduce((a, b) => a + b, 0)
   const meta = EVENT_TYPES.find((e) => e.id === event.type)!
 
   return (
@@ -467,6 +535,18 @@ export default function WorkflowCanvas({
             <span className="flex items-center gap-1"><Users size={12} />{event.headcount} people</span>
             <span className="flex items-center gap-1"><MapPin size={12} />{event.city}</span>
             <span>{tasks.length} steps · {done} complete</span>
+            {waiting > 0 && (
+              <span className="flex items-center gap-1 font-medium text-accent">
+                <Clock size={12} />
+                {waiting} awaiting {waiting === 1 ? 'reply' : 'replies'}
+              </span>
+            )}
+            {handedBack > 0 && (
+              <span className="flex items-center gap-1 font-medium text-amber-700">
+                <CircleAlert size={12} />
+                {handedBack} {handedBack === 1 ? 'needs' : 'need'} you
+              </span>
+            )}
           </div>
         </div>
         <div className="h-1.5 w-28 overflow-hidden rounded-full bg-line">
