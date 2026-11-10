@@ -1,5 +1,9 @@
 # Evently
 
+![Evently architecture: a React frontend talks to a FastAPI pod in Kubernetes that runs the agents, live sessions and event bus, backed by Postgres, Redis, Elastic Cloud, Dash0 and external AI and data services](docs/images/architecture.svg)
+
+![Evently search memory: venues, chat, transcripts and slides are copied into Elasticsearch, which powers venue memory, smarter chat, event search and live transcript search](docs/images/search-memory.svg)
+
 1. Event Type: Business, Weddings (coming soon), Reunions (coming soon), Hackathon
    a. Choose an event, size of event and the AI will come up with a event to do list -> with chat box on the side to edit any changes
    b. If the event flow is confirmed then the AI will spin up a bunch of agents that will fetch different tasks
